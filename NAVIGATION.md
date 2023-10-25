@@ -6,7 +6,13 @@ Here I am showing a very simple example of how to implement the calculation of t
 flowchart LR
 
 Intro[Introduction]
+Implementation
+Extra
 
+Intro <==> Implementation
+Intro <==> Extra
 
-click Intro "Readme.md" ""
+click Intro "Readme.md" "The introduction"
+click Implementation "Implementation.md" "The coordination implementation"
+click Extra "Extra.md" "The manual for the companion header"
 ```
