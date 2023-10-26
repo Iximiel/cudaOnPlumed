@@ -180,6 +180,7 @@ cudaHelpers.cuh is an very simple template-only library (this interface is made 
 
 `template <typename T> class memoryHolder;` will ease the memory management with an RAII approach (so no need to remember to call `cudaFree`).
 It `memoryHolder` is set up as a move-only object in a `std::unique_ptr` style. It initializes the wanted quantity of memory on construction. And has the following methods:
+ - **pointer** returns the GPU address of the allocated memory in the GPU
  - **size** returns the size of the memory allocated on the gpu that is accessible with the `copyTo` and `copyFrom` methods (in numbers of `T`, like in the STL)
  - **reserved** returns the size of the memory allocated on the gpu (in numbers of `T`, like in the STL), it may be bigger than the number returned by size
  - **resize** changes the size of the memory accessible, if the asked size is greater than the reserved memory, the memory will be reallocated, otherwise will only be changed the avaiable memory to the `copyTo` and `copyFrom` methods. A parameter regulates if the new array should contain the old data during a reallocation
@@ -188,3 +189,91 @@ It `memoryHolder` is set up as a move-only object in a `std::unique_ptr` style. 
  - **copyFromCuda**  copies `size` `T` elements from the GPU to the CPU memory (if called with a type different from `T` a conversion will be made after copying the memory)
 
  both `copyTo` and `copyFrom` have an overloaded async version that is invoked by calling the function with specifying a stream as second argument
+
+### Calling the kernel in the calculate() method
+
+as in any other calculate() we start with getting the atom positions, and we immediately load them into the GPU:
+```c++
+auto positions = getPositions();  
+cudaPositions.copyToCuda(&positions[0][0], streamDerivatives);
+```
+during the construction of the action the number of atoms has already been initialized, so no need to resize `cudaPositions` or `cudaDerivatives`. Moreover we are using the async version of copyTo, so we can set up other things on the CPU while the data is copyied.
+
+<!--describe streamDerivatives-->
+
+Then we fetch the number of atoms and we prepare the memory and the number of groups for calling the kernel:
+```c++
+auto nat = positions.size();
+constexpr unsigned nthreads = 512;
+
+//each thread work on a single atom,
+//each group collects nthreads
+unsigned ngroups = ceil(double(nat) / nthreads);
+
+cudaCoordination.resize(nat);
+cudaVirial.resize(nat * 9);
+```
+`cudaCoordination` and `cudaVirial` are the outputs of the kernel, and will need to be reduced after.
+
+the kernel is called followint the cuda guidelines:
+```c++
+//this calls getCoord with ngroups groups
+//each group has nthreads threads
+// 0b shared memory and the used stream will be streamDerivatives
+getCoord<<<ngroups, nthreads, 0, streamDerivatives>>>(
+    nat, switchingParameters,
+    cudaPositions.pointer(),
+    cudaTrueIndexes.pointer(),
+    cudaCoordination.pointer(),
+    cudaDerivatives.pointer(), 
+    cudaVirial.pointer());
+```
+`cudaTrueIndexes` is a list of the "id" of the atoms in the original file in order to avoid self interaction.
+
+After the kernel executes we have the virial and the coordination accumulated for each atom: we should reduce them with the utilities in ndReduction.cu
+```c++
+auto N = nat;
+bool first = true;
+//at each consequent iteration the kernels will return nGroups elements
+//so we repeat the loop until we have sum-reduced the data to only one (per component in the case of the virial)
+while (N > 1) {
+  size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
+  unsigned nGroups = CUDAHELPERS::idealGroups(N, runningThreads);
+
+  reductionMemoryCoord.resize(nGroups);
+  reductionMemoryVirial.resize(9 * nGroups);
+
+  if (first) {
+    cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
+    first = false;
+  }
+
+  dim3 ngroupsVirial(nGroups, 9);
+  // doReductionND will need a 2D group size,
+  //  - the first dimension is the number of group to use for each dimension,
+  //  - the second dimension is the number of dimensions of the array
+  CUDAHELPERS::doReductionND(cudaVirial.pointer(),
+      reductionMemoryVirial.pointer(),
+      N,ngroupsVirial, runningThreads, streamVirial);
+
+  CUDAHELPERS::doReduction1D(
+      cudaCoordination.pointer(),
+      reductionMemoryCoord.pointer(),
+      N, nGroups, runningThreads, streamCoordination);
+
+  if (nGroups == 1) {
+    reductionMemoryVirial.copyFromCuda(&virial[0][0], streamVirial);
+    // reduceSOut->copyFromCuda(&coordination,streamCoordination);
+    reductionMemoryCoord.copyFromCuda(&coordination, streamCoordination);
+  } else {
+    // std::swap(reduceScalarIn,reduceSOut);
+    reductionMemoryCoord.swap(cudaCoordination);
+    reductionMemoryVirial.swap(cudaVirial);
+  }
+
+  N = nGroups;
+}
+```
+
+The ND-reduction expects the data to be organized as a series of concatenated arrays:
+`[x0, x1, x2, ..., xn-2, xn-1, y0, y1, y2, ..., yn-2, yn-1, z0,... ]` and so on.
