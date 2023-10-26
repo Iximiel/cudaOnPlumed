@@ -22,7 +22,8 @@ But for simplicity, it is not implemented with the parameter $d_0$, so $s(r)=\fr
 
 Like in standard plumed, the switch has a stretch parameter: if $s(d_{max}) = shift $ and $stretch=\frac{1}{s(0)-s(d_{max})}$, $s(x)$ becames $s^s(x)=s(x)*stretch+shift$
 
-## The coord kernel
+## The kernel and the  \_\_device\_\_ functions
+### The coord kernel
 
 The simplest kernel for calculating the coordination in a group of atoms is:
 ```c++
@@ -106,3 +107,84 @@ __global__ void getSelfCoord(
 This kernel is the inner body of the nested for loop that can be used to write the most naive serial implementation of the coordination.
 
 The use of global memory should be limited in a kernel, to limit the global memory access (and hence use local memory within the kernel or shared memory within the group). Here within a kernel I have accumulated the values in local variables and not on the global memory and then update the global memory only at the end of the calculation, for example I use `mycoord += coord;` within the loop and `ncoordOut[i] = mycoord;` only at the end of kernel.
+
+The distance is calculated by using the stored x,y,z and only accessing the global memory on the "`j` side" within the llop.
+
+### The switching function
+
+The switching parameters are stored in a simple struct, when called kernels accepts struct input, hence is easier to pass collection of parameters:
+```c++
+struct rationalSwitchParameters {
+  float dmaxSQ = std::numeric_limits<float>::max();
+  float invr0_2 = 1.0; // r0=1
+  float stretch = 1.0;
+  float shift = 0.0;
+  int nn = 6;
+  int mm = 12;
+};
+```
+
+`calculateSqr` is a simple interface to the actual switching function, and calculates it for the squared distance, and it works exacly as the `PLMD::SwitchingFunction::calculateSqr` method:
+```c++
+__device__ float
+calculateSqr(const float distancesq,
+             const rationalSwitchParameters switchingParameters,
+             float &dfunc) {
+  float result = 0.0;
+  dfunc = 0.0;
+  if (distancesq < switchingParameters.dmaxSQ) {
+    const float rdist_2 = distancesq * switchingParameters.invr0_2;
+    result = pcuda_Rational(rdist_2, switchingParameters.nn / 2,
+                            switchingParameters.mm / 2, dfunc);
+    // chain rule:
+    dfunc *= 2 * switchingParameters.invr0_2;
+    // cu_stretch:
+    result = result * switchingParameters.stretch + switchingParameters.shift;
+    dfunc *= switchingParameters.stretch;
+  }
+  return result;
+}
+``` 
+so as the rational, that it is exacly like `PLMD::SwitchingFunction::do_rational`:
+```c++
+__device__ float pcuda_Rational(const float rdist, const int NN,
+                                         const int MM, float &dfunc) {
+  float result;
+  if (2 * NN == MM) {
+    // if 2*N==M, then (1.0-rdist^N)/(1.0-rdist^M) = 1.0/(1.0+rdist^N)
+    float rNdist = pcuda_fastpow(rdist, NN - 1);
+    result = 1.0 / (1 + rNdist * rdist);
+    dfunc = -NN * rNdist * result * result;
+    
+  } else {
+    if (rdist > (1. - 100.0 * cu_epsilon) && rdist < (1 + 100.0 * cu_epsilon)) {
+      result = NN / MM;
+      dfunc = 0.5 * NN * (NN - MM) / MM;
+    } else {
+      float rNdist = pcuda_fastpow(rdist, NN - 1);
+      float rMdist = pcuda_fastpow(rdist, MM - 1);
+      float num = 1. - rNdist * rdist;
+      float iden = 1.0 / (1.0 - rMdist * rdist);
+      result = num * iden;
+      dfunc = ((-NN * rNdist * iden) + (result * (iden * MM) * rMdist));
+    }
+  }
+  return result;
+}
+```
+
+## Interfacing to cuda: helpers, invoking the kernel and the reductions
+
+### cudaHelpers.cuh
+cudaHelpers.cuh is an very simple template-only library (this interface is made ad hoc for this project) that contains a simple interface for working with the memory in cuda.
+
+`template <typename T> class memoryHolder;` will ease the memory management with an RAII approach (so no need to remember to call `cudaFree`).
+It `memoryHolder` is set up as a move-only object in a `std::unique_ptr` style. It initializes the wanted quantity of memory on construction. And has the following methods:
+ - **size** returns the size of the memory allocated on the gpu that is accessible with the `copyTo` and `copyFrom` methods (in numbers of `T`, like in the STL)
+ - **reserved** returns the size of the memory allocated on the gpu (in numbers of `T`, like in the STL), it may be bigger than the number returned by size
+ - **resize** changes the size of the memory accessible, if the asked size is greater than the reserved memory, the memory will be reallocated, otherwise will only be changed the avaiable memory to the `copyTo` and `copyFrom` methods. A parameter regulates if the new array should contain the old data during a reallocation
+ - **reserve** reallocate the memory on the GPU (after calling this method `size==reserved`). A parameter regulates if the new array should contain the old data during a reallocation
+ - **copyToCuda** copies `size` `T` elements from the CPU to the GPU memory (if called with a type different from `T` a conversion will be made before copying the memory)
+ - **copyFromCuda**  copies `size` `T` elements from the GPU to the CPU memory (if called with a type different from `T` a conversion will be made after copying the memory)
+
+ both `copyTo` and `copyFrom` have an overloaded async version that is invoked by calling the function with specifying a stream as second argument
