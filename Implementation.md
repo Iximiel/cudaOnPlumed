@@ -23,8 +23,13 @@ But for simplicity, it is not implemented with the parameter $d_0$, so $s(r)=\fr
 Like in standard plumed, the switch has a stretch parameter: if $s(d_{max}) = shift $ and $stretch=\frac{1}{s(0)-s(d_{max})}$, $s(x)$ becames $s^s(x)=s(x)*stretch+shift$
 
 ## The coord kernel
+
+The simplest kernel for calculating the coordination in a group of atoms is:
 ```c++
-__global__ void getCoord(
+#define X(I) 3 * I
+#define Y(I) 3 * I + 1
+#define Z(I) 3 * I + 2
+__global__ void getSelfCoord(
     const unsigned nat,
     const rationalSwitchParameters switchingParameters,
     const ortoPBCs myPBC, const float *coordinates,
@@ -98,3 +103,6 @@ __global__ void getCoord(
   virialOut[nat * 8 + i] = myVirial[8];
 }
 ```
+This kernel is the inner body of the nested for loop that can be used to write the most naive serial implementation of the coordination.
+
+The use of global memory should be limited in a kernel, to limit the global memory access (and hence use local memory within the kernel or shared memory within the group). Here within a kernel I have accumulated the values in local variables and not on the global memory and then update the global memory only at the end of the calculation, for example I use `mycoord += coord;` within the loop and `ncoordOut[i] = mycoord;` only at the end of kernel.
