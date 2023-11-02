@@ -241,17 +241,15 @@ getCoord<<<ngroups, nthreads, 0, streamDerivatives>>>(
     cudaCoordination.pointer(),
     cudaDerivatives.pointer(), 
     cudaVirial.pointer());
-```
-After that we enque the async version of `copyFrom` on the same stream of the kernel, so that it will run AFTER the kernel and we can do other CPU operation meanwhile.
 
-```
 cudaDeviceSynchronize();
-
 ```
 
-We also call the `cudaDeviceSynchronize();` to wait for the kernel to finish: the [kernel](#the-coord-kernel) must finish before calling the reduction on its outputs!!!
+We also call the `cudaDeviceSynchronize();` to wait for the [kernel](#the-coord-kernel) to finish: we want to execute the reduction on complete data!!!
 
-After the [kernel](#the-coord-kernel) executes we have the virial and the coordination accumulated for each atom: we should reduce them with the utilities in ndReduction.cu. The reduction algorithm is recursively called by the following loop, but we enqueue also the copy from the GPU to the CPU of the derivatives, because the GPU can process two data stream and a kernel together if they are in different streams.
+After the [kernel](#the-coord-kernel) finishes we have the virial and the coordination accumulated for each atom: we proceed to accumulate the results for the whole system with the utilities in ndReduction.cu.
+The reduction algorithm is recursively called by the following loop in which we enqueue the .
+Before we enqueue the copy  of the derivatives from the GPU to the CPU, because the GPU can process two data stream and a kernel together if they are in different streams.
 ```c++
 cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
 auto N = nat;
@@ -263,7 +261,6 @@ while (N > 1) {
 
   reductionMemoryCoord.resize(nGroups);
   reductionMemoryVirial.resize(9 * nGroups);
-  
   
   //dim3 is a cuda struct that contains up to three integers
   //here we are reducing the 9 dimension of the virial
@@ -294,6 +291,18 @@ while (N > 1) {
 }
 ```
 
+The swaps of the memory are there because the output of a iteration reduction became the input of the next iteration.
+The last iteration (where `nGroups == 1`) enqueue the async version of the GPU to CPU copies.
+
 The ND-reduction expects the data to be organized as a series of concatenated arrays:
 `[x0, x1, x2, ..., xn-2, xn-1, y0, y1, y2, ..., yn-2, yn-1, z0,... ]` and so on.
 
+After the reduction/accumulation the data is then uploaded to Plumed with the standard procedure:
+```c++
+cudaDeviceSynchronize();
+for (unsigned i = 0; i < deriv.size(); ++i)
+  setAtomsDerivatives(i, deriv[i]);
+
+setValue(coordination);
+setBoxDerivatives(virial);
+```
