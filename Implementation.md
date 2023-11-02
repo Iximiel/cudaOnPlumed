@@ -179,24 +179,9 @@ From what I [understood](https://docs.nvidia.com/cuda/cuda-c-programming-guide/i
 It is possible to enforce the behaviour with  `__forceinline__` or `__inline_hint__`
 
 
-## Interfacing to cuda: helpers, invoking the kernel and the reductions
+## Interfacing to cuda: invoking the kernel and the reductions
 
-### cudaHelpers.cuh
-cudaHelpers.cuh is an very simple template-only library made ad hoc for this project. It contains a simple interface for working with the memory in cuda, and the `__device__` function for completing a binary reduction.
-
-The memory interface is a templated class: `template <typename T> class memoryHolder;` will ease the memory management with an RAII approach (so by hiding the need to call `cudaMalloc` and `cudaFree`).
-It `memoryHolder` is set up as a move-only object in a `std::unique_ptr` style. It initializes the wanted quantity of memory on construction. And has the following methods:
- - **T\* pointer()** returns the GPU address of the allocated memory in the GPU
- - **size_t size()** returns the size of the memory allocated on the gpu that is accessible with the `copyTo` and `copyFrom` methods (in numbers of `T`, like in the STL)
- - **size_t reserved()** returns the size of the memory allocated on the gpu (in numbers of `T`, like in the STL), it may be bigger than the number returned by size
- - **void resize(size_t)** changes the size of the memory accessible, if the asked size is greater than the reserved memory, the memory will be reallocated, otherwise will only be changed the avaiable memory to the `copyTo` and `copyFrom` methods. A parameter regulates if the new array should contain the old data during a reallocation
- - **void reserve(size_t)** reallocate the memory on the GPU (after calling this method `size==reserved`). A parameter regulates if the new array should contain the old data during a reallocation
- - **void copyToCuda(Y \*)** copies a number of `T` elements equal to `size` from the CPU to the GPU memory (if called with a type different from `T` a conversion will be made on the CPU before copying the memory)
- - **void copyFromCuda(Y \*)** copies a number of `T` elements equal to `size` from the GPU to the CPU memory (if called with a type different from `T` a conversion will be made on the CPU after copying the memory)
-
- both `copyTo` and `copyFrom` have an overloaded async version that is invoked by calling the function with specifying a stream as second argument  (**void copyToCuda(Y \*,cudaStream_t )**, **void copyFromCuda(Y \*, cudaStream_t )**).
-
- The reduction part will be discussed in the relative section
+Go [here](Helpers.md)
 
 ### Calling the kernel in the calculate() method
 
@@ -246,6 +231,8 @@ cudaDeviceSynchronize();
 ```
 
 We also call the `cudaDeviceSynchronize();` to wait for the [kernel](#the-coord-kernel) to finish: we want to execute the reduction on complete data!!!
+
+### Calling the reductions in the calculate() method
 
 After the [kernel](#the-coord-kernel) finishes we have the virial and the coordination accumulated for each atom: we proceed to accumulate the results for the whole system with the utilities in ndReduction.cu.
 The reduction algorithm is recursively called by the following loop in which we enqueue the .
@@ -297,7 +284,9 @@ The last iteration (where `nGroups == 1`) enqueue the async version of the GPU t
 The ND-reduction expects the data to be organized as a series of concatenated arrays:
 `[x0, x1, x2, ..., xn-2, xn-1, y0, y1, y2, ..., yn-2, yn-1, z0,... ]` and so on.
 
-After the reduction/accumulation the data is then uploaded to Plumed with the standard procedure:
+### Finalizing the results
+
+After the reduction/accumulation the data is then uploaded to Plumed with the standard procedure, again we use `cudaDeviceSynchronize();` for be sure that all the data have been moved to the CPU:
 ```c++
 cudaDeviceSynchronize();
 for (unsigned i = 0; i < deriv.size(); ++i)
