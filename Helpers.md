@@ -1,4 +1,4 @@
-# The PLMD::CUDAHELPERS library
+# The CUDAHELPERS library
 
 The helper library contains an implementation of the reduction algorithm and its interface (precompiled for float and double), along with a templated RAII helper for managing memory on the GPU.
 
