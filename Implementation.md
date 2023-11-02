@@ -182,23 +182,27 @@ It is possible to enforce the behaviour with  `__forceinline__` or `__inline_hin
 ## Interfacing to cuda: helpers, invoking the kernel and the reductions
 
 ### cudaHelpers.cuh
-cudaHelpers.cuh is an very simple template-only library made ad hoc for this project. It contains a simple interface for working with the memory in cuda:
+cudaHelpers.cuh is an very simple template-only library made ad hoc for this project. It contains a simple interface for working with the memory in cuda, and the `__device__` function for completing a binary reduction.
 
-`template <typename T> class memoryHolder;` will ease the memory management with an RAII approach (so no need to remember to call `cudaFree`).
+The memory interface is a templated class: `template <typename T> class memoryHolder;` will ease the memory management with an RAII approach (so by hiding the need to call `cudaMalloc` and `cudaFree`).
 It `memoryHolder` is set up as a move-only object in a `std::unique_ptr` style. It initializes the wanted quantity of memory on construction. And has the following methods:
- - **pointer** returns the GPU address of the allocated memory in the GPU
- - **size** returns the size of the memory allocated on the gpu that is accessible with the `copyTo` and `copyFrom` methods (in numbers of `T`, like in the STL)
- - **reserved** returns the size of the memory allocated on the gpu (in numbers of `T`, like in the STL), it may be bigger than the number returned by size
- - **resize** changes the size of the memory accessible, if the asked size is greater than the reserved memory, the memory will be reallocated, otherwise will only be changed the avaiable memory to the `copyTo` and `copyFrom` methods. A parameter regulates if the new array should contain the old data during a reallocation
- - **reserve** reallocate the memory on the GPU (after calling this method `size==reserved`). A parameter regulates if the new array should contain the old data during a reallocation
- - **copyToCuda** copies `size` `T` elements from the CPU to the GPU memory (if called with a type different from `T` a conversion will be made before copying the memory)
- - **copyFromCuda**  copies `size` `T` elements from the GPU to the CPU memory (if called with a type different from `T` a conversion will be made after copying the memory)
+ - **T\* pointer()** returns the GPU address of the allocated memory in the GPU
+ - **size_t size()** returns the size of the memory allocated on the gpu that is accessible with the `copyTo` and `copyFrom` methods (in numbers of `T`, like in the STL)
+ - **size_t reserved()** returns the size of the memory allocated on the gpu (in numbers of `T`, like in the STL), it may be bigger than the number returned by size
+ - **void resize(size_t)** changes the size of the memory accessible, if the asked size is greater than the reserved memory, the memory will be reallocated, otherwise will only be changed the avaiable memory to the `copyTo` and `copyFrom` methods. A parameter regulates if the new array should contain the old data during a reallocation
+ - **void reserve(size_t)** reallocate the memory on the GPU (after calling this method `size==reserved`). A parameter regulates if the new array should contain the old data during a reallocation
+ - **void copyToCuda(Y \*)** copies a number of `T` elements equal to `size` from the CPU to the GPU memory (if called with a type different from `T` a conversion will be made on the CPU before copying the memory)
+ - **void copyFromCuda(Y \*)** copies a number of `T` elements equal to `size` from the GPU to the CPU memory (if called with a type different from `T` a conversion will be made on the CPU after copying the memory)
 
- both `copyTo` and `copyFrom` have an overloaded async version that is invoked by calling the function with specifying a stream as second argument
+ both `copyTo` and `copyFrom` have an overloaded async version that is invoked by calling the function with specifying a stream as second argument  (**void copyToCuda(Y \*,cudaStream_t )**, **void copyFromCuda(Y \*, cudaStream_t )**).
+
+ The reduction part will be discussed in the relative section
 
 ### Calling the kernel in the calculate() method
 
-as in any other calculate() we start with getting the atom positions, and we immediately load them into the GPU:
+As in any other `PLMD::Action` we have a `calculate()` method.
+
+We start with getting the atoms positions, and we immediately load them into the GPU:
 ```c++
 auto positions = getPositions();  
 cudaPositions.copyToCuda(&positions[0][0], streamDerivatives);
@@ -221,11 +225,15 @@ cudaVirial.resize(nat * 9);
 ```
 `cudaCoordination` and `cudaVirial` are the outputs of the kernel, and will need to be reduced after.
 
-the kernel is called followint the cuda guidelines:
+the kernel is called with the `<<<>>>` syntax, between the three brackets we specify 2 to 4 informations:
+- the number of groups to use
+- the number of threads per group
+- the eventual quantity of shared memory
+- the eventual stream to enqueue the kernel into
+
+(specify the shared memory and the stream is optional):
+
 ```c++
-//this calls getCoord with ngroups groups
-//each group has nthreads threads
-// 0b shared memory and the used stream will be streamDerivatives
 getCoord<<<ngroups, nthreads, 0, streamDerivatives>>>(
     nat, switchingParameters,
     cudaPositions.pointer(),
@@ -234,12 +242,19 @@ getCoord<<<ngroups, nthreads, 0, streamDerivatives>>>(
     cudaDerivatives.pointer(), 
     cudaVirial.pointer());
 ```
-`cudaTrueIndexes` is a list of the "id" of the atoms in the original file in order to avoid self interaction.
+After that we enque the async version of `copyFrom` on the same stream of the kernel, so that it will run AFTER the kernel and we can do other CPU operation meanwhile.
 
-After the kernel executes we have the virial and the coordination accumulated for each atom: we should reduce them with the utilities in ndReduction.cu
+```
+cudaDeviceSynchronize();
+
+```
+
+We also call the `cudaDeviceSynchronize();` to wait for the kernel to finish: the [kernel](#the-coord-kernel) must finish before calling the reduction on its outputs!!!
+
+After the [kernel](#the-coord-kernel) executes we have the virial and the coordination accumulated for each atom: we should reduce them with the utilities in ndReduction.cu. The reduction algorithm is recursively called by the following loop, but we enqueue also the copy from the GPU to the CPU of the derivatives, because the GPU can process two data stream and a kernel together if they are in different streams.
 ```c++
+cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
 auto N = nat;
-bool first = true;
 //at each consequent iteration the kernels will return nGroups elements
 //so we repeat the loop until we have sum-reduced the data to only one (per component in the case of the virial)
 while (N > 1) {
@@ -248,12 +263,10 @@ while (N > 1) {
 
   reductionMemoryCoord.resize(nGroups);
   reductionMemoryVirial.resize(9 * nGroups);
-
-  if (first) {
-    cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
-    first = false;
-  }
-
+  
+  
+  //dim3 is a cuda struct that contains up to three integers
+  //here we are reducing the 9 dimension of the virial
   dim3 ngroupsVirial(nGroups, 9);
   // doReductionND will need a 2D group size,
   //  - the first dimension is the number of group to use for each dimension,
