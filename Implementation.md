@@ -1,7 +1,7 @@
 # Implementation
 
 ## The switching function
-The coordination is more or less calculated with 
+In this case the coordination is calculated with 
 $\frac{1}{2} \sum^{i=0}_{i<nat}\sum^{j=0}_{j<nat,j\neq i}f(d_{ij})$
 , where $d_{ij}$ is the distances between atom $i$ and $j$, and $f(x)$ is a function that usually has the form
 
@@ -13,27 +13,28 @@ s(x)    & d_0<x\leq d_{max}\\
 \end{cases}
 $$
 
-and $s(x)$ is a switching function that links smoothly 1 to 0 within $d_0$ and $d_{max}$
+and $s(x)$ is a switching function that links smoothly 1 to 0 between $d_0$ and $d_{max}$
 
-In this case I used the RATIONAL function like in the default plumed implementation: $s(r)=\frac{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{m} }$.
+In this case I used the RATIONAL function like in the default Plumed implementation: $s(r)=\frac{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{m} }$.
 
-The implementation of the rational function follows the one in plumed.
-But for simplicity, it is not implemented with the parameter $d_0$, so $s(r)=\frac{ 1 - \left(\frac{ r }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r }{ r_0 }\right)^{m} }$.
+But in this case, for simplicity, the implementation that I am showing will not use the parameter $d_0$, so $s(r)=\frac{ 1 - \left(\frac{ r }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r }{ r_0 }\right)^{m} }$.
 
-Like in standard plumed, the switch has a stretch parameter: if $s(d_{max}) = shift $ and $stretch=\frac{1}{s(0)-s(d_{max})}$, $s(x)$ becames $s^s(x)=s(x)*stretch+shift$
+Like in standard plumed implementation, the switching has a stretch parameter: if $s(d_{max}) = shift $ and $stretch=\frac{1}{s(0)-s(d_{max})}$, $s(x)$ becames $s^s(x)=s(x)*stretch+shift$
 
 ## The kernel and the  \_\_device\_\_ functions
 ### The coord kernel
 
+In the following code snippets the comments helps reading the flow of the code.
+Here the code is presented in a simplified way, without templates for type and without the pbc calculations.
+
 The simplest kernel for calculating the coordination in a group of atoms is:
 ```c++
-#define X(I) 3 * I
-#define Y(I) 3 * I + 1
-#define Z(I) 3 * I + 2
+//global kernels can be called by the host, but are compiled for the GPU
 __global__ void getSelfCoord(
     const unsigned nat,
+    //you can pass structs directly to kernels
     const rationalSwitchParameters switchingParameters,
-    const ortoPBCs myPBC, const float *coordinates,
+    const float *coordinates,
     const unsigned *trueIndexes, float *ncoordOut,
     float *devOut, float *virialOut) {
         
@@ -53,9 +54,9 @@ __global__ void getSelfCoord(
   float mycoord = 0.0;
   float myVirial[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   //local calculation aid
-  float x = coordinates[X(i)];
-  float y = coordinates[Y(i)];
-  float z = coordinates[Z(i)];
+  float x = coordinates[3*i];
+  float y = coordinates[3*i+1];
+  float z = coordinates[3*i+2];
   float d[3];
   float dfunc;
   float coord;
@@ -64,9 +65,9 @@ __global__ void getSelfCoord(
     if (idx == trueIndexes[j])
       continue;
     
-    d[0] = coordinates[X(j)] - x;
-    d[1] = coordinates[Y(j)] - y;
-    d[2] = coordinates[Z(j)] - z;
+    d[0] = coordinates[3*j] - x;
+    d[1] = coordinates[3*j+1] - y;
+    d[2] = coordinates[3*j+2] - z;
     
 
     dfunc = 0.;
@@ -88,7 +89,7 @@ __global__ void getSelfCoord(
       myVirial[8] -= dfunc * d[2] * d[2];
     }
   }
-  // updating global memory ONLY at the end
+  // updating global memory ONLY at the end, to access to global memory fewer times per kernel
   devOut[X(i)] = mydevX;
   devOut[Y(i)] = mydevY;
   devOut[Z(i)] = mydevZ;
@@ -104,19 +105,19 @@ __global__ void getSelfCoord(
   virialOut[nat * 8 + i] = myVirial[8];
 }
 ```
-This kernel is the inner body of the nested for loop that can be used to write the most naive serial implementation of the coordination.
 
-The use of global memory should be limited in a kernel, to limit the global memory access (and hence use local memory within the kernel or shared memory within the group). Here within a kernel I have accumulated the values in local variables and not on the global memory and then update the global memory only at the end of the calculation, for example I use `mycoord += coord;` within the loop and `ncoordOut[i] = mycoord;` only at the end of kernel.
+You can view this kernel as the inner body of the nested for loop that can be used to write the most naive serial implementation of the coordination (the outer loop would run on the `i` variable).
 
-The distance is calculated by using the stored x,y,z and only accessing the global memory on the "`j` side" within the llop.
+The use of global memory should be limited in a kernel, because accessing global memory is far slower that working on shared memory (that it is not used in this case, shared memory is shared between kernels within a group) or the local memory declared within each kernel.
+Here within each kernel I have accumulated the values in local variables and not on the global memory and then update the global memory only at the end of the calculation. Using `mycoord += coord;` instead of `ncoordOut[i] += coord;` within the loop will speed up the calculations. only at the end of kernel.
 
 ### The switching function
 
-The switching parameters are stored in a simple struct, when called kernels accepts struct input, hence is easier to pass collection of parameters:
+The switching parameters are stored in a simple struct: when called, kernels accepts struct variables as inputs, making simpler to pass parameters to functions:
 ```c++
 struct rationalSwitchParameters {
   float dmaxSQ = std::numeric_limits<float>::max();
-  float invr0_2 = 1.0; // r0=1
+  float invr0_2 = 1.0;
   float stretch = 1.0;
   float shift = 0.0;
   int nn = 6;
@@ -124,8 +125,9 @@ struct rationalSwitchParameters {
 };
 ```
 
-`calculateSqr` is a simple interface to the actual switching function, and calculates it for the squared distance, and it works exacly as the `PLMD::SwitchingFunction::calculateSqr` method:
+`calculateSqr` is a simple interface to the actual switching function, and takes the squared distance and prepares it for the actual rational function (by precalculationg $\left(\frac{ r }{ r_0 }\right)$). It is a rewriting of the `PLMD::SwitchingFunction::calculateSqr` method as a `__device__` function:
 ```c++
+//device functions can called by other __device__ functions or kernel on the device, but not from the host
 __device__ float
 calculateSqr(const float distancesq,
              const rationalSwitchParameters switchingParameters,
@@ -145,7 +147,7 @@ calculateSqr(const float distancesq,
   return result;
 }
 ``` 
-so as the rational, that it is exacly like `PLMD::SwitchingFunction::do_rational`:
+Also `pcuda_Rational` is a rewrite to the method `PLMD::SwitchingFunction::do_rational` for the GPU:
 ```c++
 __device__ float pcuda_Rational(const float rdist, const int NN,
                                          const int MM, float &dfunc) {
@@ -173,10 +175,14 @@ __device__ float pcuda_Rational(const float rdist, const int NN,
 }
 ```
 
+From what I [understood](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#noinline-and-forceinline) the compilers tend to inline `__device__` functions.
+It is possible to enforce the behaviour with  `__forceinline__` or `__inline_hint__`
+
+
 ## Interfacing to cuda: helpers, invoking the kernel and the reductions
 
 ### cudaHelpers.cuh
-cudaHelpers.cuh is an very simple template-only library (this interface is made ad hoc for this project) that contains a simple interface for working with the memory in cuda.
+cudaHelpers.cuh is an very simple template-only library made ad hoc for this project. It contains a simple interface for working with the memory in cuda:
 
 `template <typename T> class memoryHolder;` will ease the memory management with an RAII approach (so no need to remember to call `cudaFree`).
 It `memoryHolder` is set up as a move-only object in a `std::unique_ptr` style. It initializes the wanted quantity of memory on construction. And has the following methods:
@@ -277,3 +283,4 @@ while (N > 1) {
 
 The ND-reduction expects the data to be organized as a series of concatenated arrays:
 `[x0, x1, x2, ..., xn-2, xn-1, y0, y1, y2, ..., yn-2, yn-1, z0,... ]` and so on.
+
