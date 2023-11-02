@@ -22,111 +22,35 @@
 #include <vector>
 
 namespace CUDAHELPERS {
-/// @brief reduce the component of a nat x 3 x nthreads vector
-/// @return a std::vector that contains the the reduced nat Vectors
-/// We are using nat as the number of vector because usually this is used to
-/// reduce the per atom derivatives
-/** @brief reduce the component of a 3 x nat x N vector
- *  @param cudaNVectorAddress the pointer to the memory in cuda
- *  @param N the number of Tensors to reduce
- *  @param nat the number
- *  @param maxNumThreads limits the number of threads per block to be used
- *  @return the reduced Vector
- *
- * reduceTensor expects that cudaNVectorAddress is initializated with
- * cudaMalloc(&cudaVectorAddress,  N * nat * 3 * sizeof(double)).
- * The componensts of cudaVectorAddress in memory shoud be organized like
- *  [x0_0, y0_0, z0_0, ..., x0_(nat-1), y0_(nat-1), z0_(nat-1),
- *   x1_0, y1_0, z1_0, ..., x1_(nat-1), y1_(nat-1), z1_(nat-1),
- *      ...
- *  x(N-1)_0, y(N-1)_0, z(N-1)_0, ..., x(N-1)_(nat-1), y(N-1)_(nat-1),
- * z(N-1)_(nat-1)(N-1)
- *
- * The algorithm will decide the best number of threads to be used in
- * an extra nthreads * 3 * sizeof(double) will be allocated on the GPU,
- * where nthreads is the total number of threads that will be used
- *
- * @note cudaNVectorAddress is threated as not owned: the user will need to call
- * cudaFree on it!!!
+
+/** @brief reduce the input 1D cudaArray
+ * @param inputArray the data to be reduced, this must point to a memory
+ * address into the GPU
+ * @param outputArray the address for the result of the reduction, this must
+ * point to a memory address into the GPU
+ * @param len the lenght of the array
+ * @param blocks the dimension of the group to use
+ * @param nthreads the number of threads per group (must be a power of 2)
+ * @param stream the optional stream for concurrency
  */
-std::vector<Vector> reduceNVectors(double *cudaNVectorAddress, unsigned N,
-                                   unsigned nat, unsigned maxNumThreads = 512);
-
-// THIS DOES NOT KEEP THE DATA SAFE
-std::vector<Vector> reduceNVectors(memoryHolder<double> &cudaNVectorAddress,
-                                   memoryHolder<double> &memoryHelper,
-                                   unsigned N, unsigned nat,
-                                   unsigned maxNumThreads);
-
-/** @brief reduce the component of a 3 x N vector
- *  @param cudaVectorAddress the pointer to the memory in cuda
- *  @param N the number of Vectors to reduce
- *  @param maxNumThreads limits the number of threads per block to be used
- *  @return the reduced Vector
- *
- * reduceTensor expects that cudaVectorAddress is initializated with
- * cudaMalloc(&cudaVectorAddress,  N * 3 * sizeof(double)).
- * The componensts of cudaVectorAddress in memory shoud be organized like
- *  [x0, y0, z0, x1, y1, z1 ... x(N-1), y(N-1), z(N-1)]
- *
- * The algorithm will decide the best number of threads to be used in
- * an extra nthreads * 3 * sizeof(double) will be allocated on the GPU,
- * where nthreads is the total number of threads that will be used
- *
- * @note cudaVectorAddress is threated as not owned: the user will need to call
- * cudaFree on it!!!
- */
-Vector reduceVector(double *cudaVectorAddress, unsigned N,
-                    unsigned maxNumThreads = 512);
-
-/** @brief reduces a Tensor from 3x3 x N to 3x3
- *  @param cudaTensorAddress the pointer to the memory in cuda
- *  @param N the number of Tensors to reduce
- *  @param maxNumThreads limits the number of threads per block to be used
- *  @return the reduced Tensor
- *
- * reduceTensor expects that cudaTensorAddress is initializated with
- * cudaMalloc(&cudaTensorAddress,  N * 9 * sizeof(double)).
- * The componensts of cudaVectorAddress in memory shoud be stred in organized in
- * N sequential blocks whose compontents shall be [(0,0) (0,1) (0,2) (1,0) (1,1)
- * (1,2) (2,0) (2,1) (2,2)]
- *
- * The algorithm will decide the best number of threads to be used in
- * an extra nthreads * 9 * sizeof(double) will be allocated on the GPU,
- * where nthreads is the total number of threads that will be used
- *
- * @note cudaTensorAddress is threated as not owned: the user will need to call
- * cudaFree on it!!!
- */
-
-/** @brief reduce the component of a N vector to a scalar
- *  @param cudaScalarAddress the pointer to the memory in cuda
- *  @param N the number of scalar to reduce
- *  @param maxNumThreads limits the number of threads per block to be used
- *  @return the reduced scalar
- *
- * reduceTensor expects that cudaVectorAddress is initializated with
- * cudaMalloc(&cudaVectorAddress,  N * sizeof(double)).
- * The componensts of cudaScalarAddress in memory shoud be organized like
- *  [x0, x1, x2 ...,  x(N-1)]
- *
- * The algorithm will decide the best number of threads to be used in
- * an extra nthreads * sizeof(double) will be allocated on the GPU,
- * where nthreads is the total number of threads that will be used
- *
- * @note cudaScalarAddress is threated as not owned: the user will need to call
- * cudaFree on it!!!
- */
-double reduceScalar(double *cudaScalarAddress, unsigned N,
-                    unsigned maxNumThreads = 512);
-double reduceScalar(memoryHolder<double> &cudaScalarAddress,
-                    memoryHolder<double> &memoryHelper, unsigned N,
-                    unsigned maxNumThreads = 512);
-
 void doReduction1D(double *inputArray, double *outputArray,
                    const unsigned int len, const unsigned blocks,
                    const unsigned nthreads, cudaStream_t stream = 0);
 
+/** @brief reduce the input ND cudaArray
+ * @param inputArray the data to be reduced, this must point to a memory address
+ * into the GPU
+ * @param outputArray the address for the result of the reduction, this must
+ * point to a memory address into the GPU
+ * @param len the lenght of the array
+ * @param blocks the dimension of the group to use (must be (ngroup,ndim))
+ * @param nthreads the number of threads per group (must be a power of 2)
+ * @param stream the optional stream for concurrency
+ *
+ * The componensts of inputArray in memory shoud be stored organized in N
+ * sequential blocks of len, represneting each dimension like: [x0, y0, z0, x1,
+ * y1, z1 ... x(N-1), y(N-1), z(N-1)]
+ */
 void doReductionND(double *inputArray, double *outputArray,
                    const unsigned int len, const dim3 blocks,
                    const unsigned nthreads, cudaStream_t stream = 0);

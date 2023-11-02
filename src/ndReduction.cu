@@ -68,6 +68,10 @@ __global__ void reductionND(const T *inputArray, T *outputArray,
     sdata[threadIdx.x] += inputArray[i] + inputArray[i + numThreads];
     i += gridSize;
   }
+  // The double while is for preventig to lose the last data (the
+  // https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
+  // implementation sums over 2^n integers, here we are not using a number of
+  // data that is power of 2)
   while (i < trgt) {
     sdata[threadIdx.x] += inputArray[i];
     i += gridSize;
@@ -87,7 +91,6 @@ __global__ void reduction1D(T *inputArray, T *outputArray,
   unsigned int i = (2 * numThreads) * blockIdx.x + place;
   const unsigned int gridSize = (2 * numThreads) * gridDim.x;
   sdata[place] = T(0);
-  // The double while is for preventig wrong memory
   while (i + numThreads < len) {
     sdata[place] += inputArray[i] + inputArray[i + numThreads];
     i += gridSize;
@@ -118,8 +121,9 @@ size_t idealGroups(size_t numberOfElements, size_t runningThreads) {
   const size_t nnToGPU =
       nearestUpperMultipleTo(numberOfElements, runningThreads);
   /// Brent’s theorem says each thread should sum O(log n) elements
-  // const size_t elementsPerThread=log(nnToGPU);
-  const size_t expectedTotalThreads = ceil(nnToGPU / log(nnToGPU));
+  // https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
+  // const size_t elementsPerThread=log2(runningThreads);
+  const size_t expectedTotalThreads = ceil(nnToGPU / log2(runningThreads));
   // hence the blocks should have this size:
   const unsigned ngroups =
       nearestUpperMultipleTo(expectedTotalThreads, runningThreads) /
@@ -131,7 +135,7 @@ size_t threadsPerBlock(unsigned N, unsigned maxNumThreads) {
   // this seeks the minimum number of threads to use a sigle block (and end the
   // recursion)
   size_t dim = 32;
-  for (dim = 32; dim < 512; dim <<= 1) {
+  for (dim = 32; dim < 1024; dim <<= 1) {
     if (maxNumThreads < dim) {
       dim >>= 1;
       break;

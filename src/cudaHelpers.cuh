@@ -171,6 +171,7 @@ public:
 template <unsigned numThreads, typename T>
 __device__ void reductor(volatile T *sdata, T *outputArray,
                          const unsigned int where) {
+  // this is an unrolled loop
   const unsigned int tid = threadIdx.x;
   if (numThreads >= 1024) { // compile time
     if (tid < 512)
@@ -192,6 +193,8 @@ __device__ void reductor(volatile T *sdata, T *outputArray,
       sdata[tid] += sdata[tid + 64];
     __syncthreads();
   }
+  // a warp is composed by 32 threads that executes instructions syncrhonized,
+  // so no  need to use __syncthreads() for the last iterations;
   if (tid < mymin(32u, numThreads / 2)) {
     // warpReduce<numThreads>(sdata, tid);
     if (numThreads >= 64) { // compile time
