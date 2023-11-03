@@ -4,6 +4,8 @@ The helper library contains an implementation of the reduction algorithm and its
 
 The helper library is composed by a main header (ndReduction.h) with iss companion code in ndReduction.cu and a hidden header cudaHelpers.cuh.
 
+See the [coordination implementation](Implementation.md) for an example on how use the code described here.
+
 ## The reduction interface
 
 The reduction is implemented following [this guide](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf). ndReduction.h exposes the interface to the reduction algorithm
