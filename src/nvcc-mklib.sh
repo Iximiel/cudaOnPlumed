@@ -1,7 +1,7 @@
 #! /usr/bin/env bash
 
 if [ "$1" = --description ]; then
-  echo "compile a .cu file into a shared library"
+  echo "compile a .cu file and ndReduction into a shared library"
   exit 0
 fi
 
@@ -30,9 +30,9 @@ fi
 rm -f "$obj" "$lib"
 
 #nvcc "$2" -Xcompiler -fPIC -c -o "$kernel"
-compile="nvcc -g -ccbin ${compile}"
+compile="nvcc -dc -dlto -ccbin ${compile}"
 #compile=${compile/-O3/-g}
-echo $compile
+
 if [[ ${SILENT_CUDA_COMPILATION} ]]; then
   #echo "disabled warning"
   compile=${compile//-Wall/}
@@ -51,7 +51,7 @@ if [[ -z ${link_command:+x} ]]; then
   link_command=$link_installed
 fi
 
-link_command="nvcc -shared${link_command#*-shared}"
+link_command="nvcc -shared -dlto ${link_command#*-shared}"
 link_command=${link_command/-rdynamic/-Xcompiler -rdynamic}
 link_command=${link_command/-Wl,/-Xlinker }
 #link_command=${link_command/-fopenmp/-Xcompiler -fopenmp}
@@ -59,7 +59,6 @@ for opt in -f; do
   link_command=${link_command//${opt}/-Xcompiler ${opt}}
 done
 
-eval "$compile" "$obj" "$file" && \
-eval "$compile" "ndReduction.o" "ndReduction.cu" && \
-eval "$link_command" "$lib" -lcusparse "ndReduction.o" "$obj"
-
+eval "$compile" "$obj" "$file" &&
+  eval "$compile" "ndReduction.o" "ndReduction.cu" &&
+  eval "$link_command" "$lib" -lcusparse "ndReduction.o" "$obj"
