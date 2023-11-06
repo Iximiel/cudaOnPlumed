@@ -27,6 +27,9 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
+// cfloat for DLB_EPSILON and FLT_EPSILON
+#include <cfloat>
+
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -194,6 +197,17 @@ __device__ calculateFloat pcuda_fastpow(calculateFloat base, int expo) {
   return result;
 }
 
+template <typename calculateFloat> __device__ calculateFloat pcuda_eps() {
+  return 0;
+}
+
+template <> constexpr __device__ float pcuda_eps<float>() {
+  return FLT_EPSILON * 10.0f;
+}
+template <> constexpr __device__ double pcuda_eps<double>() {
+  return DBL_EPSILON * 10.0;
+}
+
 template <typename calculateFloat>
 __device__ calculateFloat pcuda_Rational(const calculateFloat rdist,
                                          const int NN, const int MM,
@@ -205,8 +219,9 @@ __device__ calculateFloat pcuda_Rational(const calculateFloat rdist,
     result = 1.0 / (1 + rNdist * rdist);
     dfunc = -NN * rNdist * result * result;
   } else {
-    if (rdist > (1. - 10.0 * std::numeric_limits<calculateFloat>::epsilon()) &&
-        rdist < (1 + 10.0 * std::numeric_limits<calculateFloat>::epsilon())) {
+    if (rdist > (1. - pcuda_eps<calculateFloat>()) &&
+        rdist < (1 + pcuda_eps<calculateFloat>())) {
+
       result = NN / MM;
       dfunc = 0.5 * NN * (NN - MM) / MM;
     } else {

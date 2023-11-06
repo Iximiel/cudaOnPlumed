@@ -21,6 +21,9 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
+// needed for plumed_merror
+#include "plumed/tools/Exception.h"
+
 #include <iomanip>
 #include <iostream>
 #include <numeric>

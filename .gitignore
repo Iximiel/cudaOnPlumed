@@ -1,2 +1,4 @@
 .vscode
 make.inc
+*.o
+*.so
