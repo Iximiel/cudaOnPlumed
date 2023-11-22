@@ -183,7 +183,7 @@ It is possible to enforce the behaviour with  `__forceinline__` or `__inline_hin
 
 ## Interfacing to cuda: invoking the kernel and the reductions
 
-Go [here](Helpers.md)
+Go to the [helpers](Helpers.md) page for details on the reduction and on how the memory handlers works.
 
 ### Calling the kernel in the calculate() method
 
@@ -195,8 +195,6 @@ auto positions = getPositions();
 cudaPositions.copyToCuda(&positions[0][0], streamDerivatives);
 ```
 during the construction of the action the number of atoms has already been initialized, so no need to resize `cudaPositions` or `cudaDerivatives`. Moreover we are using the async version of copyTo, so we can set up other things on the CPU while the data is copyied.
-
-<!--describe streamDerivatives-->
 
 Then we fetch the number of atoms and we prepare the memory and the number of groups for calling the kernel:
 ```c++
