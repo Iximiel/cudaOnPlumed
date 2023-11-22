@@ -1,0 +1,6 @@
+#look here https://plumed-school.github.io !!!
+url: 
+instructors: Daniele Rapetti
+title: Rewriting the coordination for plumed in Cuda
+description: How I reimplemented a basic version of the CV Coordination with cuda
+tags: developers, C++, parallelism, Cuda
