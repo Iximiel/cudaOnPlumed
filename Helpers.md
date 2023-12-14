@@ -2,7 +2,7 @@
 
 The helper library contains an implementation of the reduction algorithm and its interface (precompiled for float and double), along with a templated RAII helper for managing memory on the GPU.
 
-The helper library is composed by a main header (ndReduction.h) with iss companion code in ndReduction.cu and a hidden header cudaHelpers.cuh.
+The helper library is composed by a main header (ndReduction.h) with its companion code in ndReduction.cu and a hidden header cudaHelpers.cuh.
 
 See the [coordination implementation](Implementation.md) for an example on how use the code described here.
 
@@ -22,7 +22,7 @@ The reduction is implemented following [this guide](https://developer.download.n
  const unsigned int len,
  const dim3 blocks,
  const unsigned nthreads,
- cudaStream_t stream=0);`{:.c++} calls the appropriate reduction kernel for a 1D array
+ cudaStream_t stream=0);`{:.c++} calls the appropriate reduction kernel for a N-dimensional array
 
 ## The memory helper
 cudaHelpers.cuh is an very simple template-only library made ad hoc for this project. It contains a simple interface for working with the memory in cuda, and the `__device__` function for completing a binary reduction.

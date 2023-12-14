@@ -3,9 +3,7 @@
 Small disclaimer: the code I am presenting here is a simplified version of the actual code that is avaiable as example implementation in this [repository](https://github.com/Iximiel/cudaOnPlumed). The actual implementation has type templates and supports pbcs. These particulares are not useful in understanding the basis for a plumed implementation ofa  simple CV.
 
 ## The switching function
-In this case the coordination is calculated with 
-$\frac{1}{2} \sum^{i=0}_{i<nat}\sum^{j=0}_{j<nat,j\neq i}f(d_{ij})$
-, where $d_{ij}$ is the distances between atom $i$ and $j$, and $f(x)$ is a function that usually has the form
+In this case the coordination is calculated with $\frac{1}{2} \sum_{i\lt{}nat}^{i} \sum_{j\lt{}nat,j\neq i}^{j} f(d_{ij})$, where $d_{ij}$ is the distances between atom $i$ and $j$, and $f(x)$ is a function that usually has the form
 
 $$
 f(x)=\begin{cases}
