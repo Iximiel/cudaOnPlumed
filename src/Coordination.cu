@@ -391,19 +391,31 @@ getCoord(const unsigned nat,
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
   if (i >= nat) // blocks are initializated with 'ceil (nat/threads)'
     return;
-  // we try working with less global memory possible
+  // we try working with less global memory possible, so we set up a bunch of
+  // temporary variables
   const unsigned idx = trueIndexes[i];
   // local results
   calculateFloat mydevX = 0.0;
   calculateFloat mydevY = 0.0;
   calculateFloat mydevZ = 0.0;
   calculateFloat mycoord = 0.0;
-  calculateFloat myVirial[9] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  // the previous version used static array for myVirial and d
+  // using explicit variables guarantees that this data will be stored in
+  // registers
+  calculateFloat myVirial_0 = 0.0;
+  calculateFloat myVirial_1 = 0.0;
+  calculateFloat myVirial_2 = 0.0;
+  calculateFloat myVirial_3 = 0.0;
+  calculateFloat myVirial_4 = 0.0;
+  calculateFloat myVirial_5 = 0.0;
+  calculateFloat myVirial_6 = 0.0;
+  calculateFloat myVirial_7 = 0.0;
+  calculateFloat myVirial_8 = 0.0;
   // local calculation aid
   calculateFloat x = coordinates[X(i)];
   calculateFloat y = coordinates[Y(i)];
   calculateFloat z = coordinates[Z(i)];
-  calculateFloat d[3];
+  calculateFloat d_0, d_1, d_2;
   calculateFloat dfunc;
   calculateFloat coord;
   for (unsigned j = 0; j < nat; ++j) {
@@ -415,34 +427,35 @@ getCoord(const unsigned nat,
     // or may be better to set up an
     // const unsigned xyz = threadIdx.z
     // where the third dim is 0 1 2 ^
+    // ?
     if (usePBC) {
-      d[0] = pbcClamp((coordinates[X(j)] - x) * myPBC.invX) * myPBC.X;
-      d[1] = pbcClamp((coordinates[Y(j)] - y) * myPBC.invY) * myPBC.Y;
-      d[2] = pbcClamp((coordinates[Z(j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = pbcClamp((coordinates[X(j)] - x) * myPBC.invX) * myPBC.X;
+      d_1 = pbcClamp((coordinates[Y(j)] - y) * myPBC.invY) * myPBC.Y;
+      d_2 = pbcClamp((coordinates[Z(j)] - z) * myPBC.invZ) * myPBC.Z;
 
     } else {
-      d[0] = coordinates[X(j)] - x;
-      d[1] = coordinates[Y(j)] - y;
-      d[2] = coordinates[Z(j)] - z;
+      d_0 = coordinates[X(j)] - x;
+      d_1 = coordinates[Y(j)] - y;
+      d_2 = coordinates[Z(j)] - z;
     }
 
     dfunc = 0.;
-    coord = calculateSqr(d[0] * d[0] + d[1] * d[1] + d[2] * d[2],
-                         switchingParameters, dfunc);
-    mydevX -= dfunc * d[0];
-    mydevY -= dfunc * d[1];
-    mydevZ -= dfunc * d[2];
+    coord = calculateSqr(d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters,
+                         dfunc);
+    mydevX -= dfunc * d_0;
+    mydevY -= dfunc * d_1;
+    mydevZ -= dfunc * d_2;
     if (i < j) {
       mycoord += coord;
-      myVirial[0] -= dfunc * d[0] * d[0];
-      myVirial[1] -= dfunc * d[0] * d[1];
-      myVirial[2] -= dfunc * d[0] * d[2];
-      myVirial[3] -= dfunc * d[1] * d[0];
-      myVirial[4] -= dfunc * d[1] * d[1];
-      myVirial[5] -= dfunc * d[1] * d[2];
-      myVirial[6] -= dfunc * d[2] * d[0];
-      myVirial[7] -= dfunc * d[2] * d[1];
-      myVirial[8] -= dfunc * d[2] * d[2];
+      myVirial_0 -= dfunc * d_0 * d_0;
+      myVirial_1 -= dfunc * d_0 * d_1;
+      myVirial_2 -= dfunc * d_0 * d_2;
+      myVirial_3 -= dfunc * d_1 * d_0;
+      myVirial_4 -= dfunc * d_1 * d_1;
+      myVirial_5 -= dfunc * d_1 * d_2;
+      myVirial_6 -= dfunc * d_2 * d_0;
+      myVirial_7 -= dfunc * d_2 * d_1;
+      myVirial_8 -= dfunc * d_2 * d_2;
     }
   }
   // working in global memory ONLY at the end
@@ -450,15 +463,15 @@ getCoord(const unsigned nat,
   devOut[Y(i)] = mydevY;
   devOut[Z(i)] = mydevZ;
   ncoordOut[i] = mycoord;
-  virialOut[nat * 0 + i] = myVirial[0];
-  virialOut[nat * 1 + i] = myVirial[1];
-  virialOut[nat * 2 + i] = myVirial[2];
-  virialOut[nat * 3 + i] = myVirial[3];
-  virialOut[nat * 4 + i] = myVirial[4];
-  virialOut[nat * 5 + i] = myVirial[5];
-  virialOut[nat * 6 + i] = myVirial[6];
-  virialOut[nat * 7 + i] = myVirial[7];
-  virialOut[nat * 8 + i] = myVirial[8];
+  virialOut[nat * 0 + i] = myVirial_0;
+  virialOut[nat * 1 + i] = myVirial_1;
+  virialOut[nat * 2 + i] = myVirial_2;
+  virialOut[nat * 3 + i] = myVirial_3;
+  virialOut[nat * 4 + i] = myVirial_4;
+  virialOut[nat * 5 + i] = myVirial_5;
+  virialOut[nat * 6 + i] = myVirial_6;
+  virialOut[nat * 7 + i] = myVirial_7;
+  virialOut[nat * 8 + i] = myVirial_8;
 }
 
 #define getCoordOrthoPBC getCoord<true>
