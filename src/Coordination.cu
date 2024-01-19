@@ -416,6 +416,7 @@ getCoord(const unsigned nat,
   calculateFloat y = coordinates[Y(i)];
   calculateFloat z = coordinates[Z(i)];
   calculateFloat d_0, d_1, d_2;
+  calculateFloat t_0, t_1, t_2;
   calculateFloat dfunc;
   calculateFloat coord;
   for (unsigned j = 0; j < nat; ++j) {
@@ -442,20 +443,24 @@ getCoord(const unsigned nat,
     dfunc = 0.;
     coord = calculateSqr(d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters,
                          dfunc);
-    mydevX -= dfunc * d_0;
-    mydevY -= dfunc * d_1;
-    mydevZ -= dfunc * d_2;
+
+    t_0 = dfunc * d_0;
+    t_1 = dfunc * d_1;
+    t_2 = dfunc * d_2;
+    mydevX -= t_0;
+    mydevY -= t_1;
+    mydevZ -= t_2;
     if (i < j) {
       mycoord += coord;
-      myVirial_0 -= dfunc * d_0 * d_0;
-      myVirial_1 -= dfunc * d_0 * d_1;
-      myVirial_2 -= dfunc * d_0 * d_2;
-      myVirial_3 -= dfunc * d_1 * d_0;
-      myVirial_4 -= dfunc * d_1 * d_1;
-      myVirial_5 -= dfunc * d_1 * d_2;
-      myVirial_6 -= dfunc * d_2 * d_0;
-      myVirial_7 -= dfunc * d_2 * d_1;
-      myVirial_8 -= dfunc * d_2 * d_2;
+      myVirial_0 -= t_0 * d_0;
+      myVirial_1 -= t_0 * d_1;
+      myVirial_2 -= t_0 * d_2;
+      myVirial_3 -= t_1 * d_0;
+      myVirial_4 -= t_1 * d_1;
+      myVirial_5 -= t_1 * d_2;
+      myVirial_6 -= t_2 * d_0;
+      myVirial_7 -= t_2 * d_1;
+      myVirial_8 -= t_2 * d_2;
     }
   }
   // working in global memory ONLY at the end
