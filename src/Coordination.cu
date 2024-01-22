@@ -494,9 +494,9 @@ void CudaCoordination<calculateFloat>::calculate() {
   double coordination;
   auto deriv = std::vector<Vector>(nat);
 
-  constexpr unsigned nthreads = 512;
+  // constexpr unsigned nthreads = 512;
 
-  unsigned ngroups = ceil(double(nat) / nthreads);
+  unsigned ngroups = ceil(double(nat) / maxNumThreads);
 
   /**********************allocating the memory on the GPU**********************/
   cudaCoordination.resize(nat);
@@ -515,12 +515,12 @@ void CudaCoordination<calculateFloat>::calculate() {
     myPBC.invY = 1.0 / myPBC.Y;
     myPBC.invZ = 1.0 / myPBC.Z;
 
-    getCoordOrthoPBC<<<ngroups, nthreads, 0, streamDerivatives>>>(
+    getCoordOrthoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>>(
         nat, switchingParameters, myPBC, cudaPositions.pointer(),
         cudaTrueIndexes.pointer(), cudaCoordination.pointer(),
         cudaDerivatives.pointer(), cudaVirial.pointer());
   } else {
-    getCoordNoPBC<<<ngroups, nthreads, 0, streamDerivatives>>>(
+    getCoordNoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>>(
         nat, switchingParameters, myPBC, cudaPositions.pointer(),
         cudaTrueIndexes.pointer(), cudaCoordination.pointer(),
         cudaDerivatives.pointer(), cudaVirial.pointer());
