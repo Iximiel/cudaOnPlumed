@@ -21,8 +21,11 @@
 #include "plumed/tools/NeighborList.h"
 #include "plumed/tools/SwitchingFunction.h"
 
+#include "cudaHelpers.cuh"
+#include "ndReduction.h"
 
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -120,7 +123,7 @@ template <> __device__ float pbcClamp<float>(float x) {
 // does not inherit from coordination base because nl is private
 template <typename calculateFloat> class CudaCoordination : public Colvar {
   /// the pointer to the coordinates on the GPU
-  thrust::device_vector<calculateFloat> cudaPositions;
+  // thrust::device_vector<calculateFloat> cudaPositions;
   /// the pointer to the nn list on the GPU
   thrust::device_vector<calculateFloat> cudaCoordination;
   thrust::device_vector<calculateFloat> cudaDerivatives;
@@ -155,14 +158,14 @@ PLUMED_REGISTER_ACTION(CudaCoordination_f, "CUDACOORDINATIONFLOAT")
 template <typename calculateFloat>
 void CudaCoordination<calculateFloat>::setUpPermanentGPUMemory() {
   auto nat = getPositions().size();
-  cudaPositions.resize(3 * nat);
+  // cudaPositions.resize(3 * nat);
   cudaDerivatives.resize(3 * nat);
   cudaTrueIndexes.resize(nat);
   std::vector<unsigned> trueIndexes(nat);
   for (size_t i = 0; i < nat; ++i) {
     trueIndexes[i] = getAbsoluteIndex(i).index();
   }
-  cudaTrueIndexes.copyToCuda(trueIndexes.data(), streamDerivatives);
+  cudaTrueIndexes = trueIndexes;
 }
 
 template <typename calculateFloat>
@@ -320,17 +323,17 @@ CudaCoordination<calculateFloat>::CudaCoordination(const ActionOptions &ao)
       std::vector<calculateFloat> inputs = {0.0, dmax * invr0};
 
       thrust::device_vector<calculateFloat> inputZeroMax(2);
-      inputZeroMax.copyToCuda(inputs.data());
+      inputZeroMax = inputs;
       thrust::device_vector<calculateFloat> dummydfunc(2);
       thrust::device_vector<calculateFloat> resZeroMax(2);
 
-      getpcuda_Rational<<<1, 2>>>(inputZeroMax.pointer(), nn_, mm_,
-                                  dummydfunc.pointer(), resZeroMax.pointer());
-      std::vector<calculateFloat> s = {0.0, 0.0};
-      resZeroMax.copyFromCuda(s.data());
+      getpcuda_Rational<<<1, 2>>>(thrust::raw_pointer_cast(inputZeroMax.data()),
+                                  nn_, mm_,
+                                  thrust::raw_pointer_cast(dummydfunc.data()),
+                                  thrust::raw_pointer_cast(resZeroMax.data()));
 
-      switchingParameters.stretch = 1.0 / (s[0] - s[1]);
-      switchingParameters.shift = -s[1] * switchingParameters.stretch;
+      switchingParameters.stretch = 1.0 / (resZeroMax[0] - resZeroMax[1]);
+      switchingParameters.shift = -resZeroMax[1] * switchingParameters.stretch;
     }
   }
 
@@ -485,10 +488,11 @@ getCoord(const unsigned nat,
 template <typename calculateFloat>
 void CudaCoordination<calculateFloat>::calculate() {
   auto positions = getPositions();
-  /***************************copying data on the GPU**************************/
-  cudaPositions.copyToCuda(&positions[0][0], streamDerivatives);
-  /***************************copying data on the GPU**************************/
   auto nat = positions.size();
+  /***************************copying data on the GPU**************************/
+  thrust::device_vector<calculateFloat> cudaPositions(
+      &positions[0][0], &positions[0][0] + nat * 3);
+  /***************************copying data on the GPU**************************/
 
   Tensor virial;
   double coordination;
@@ -516,21 +520,30 @@ void CudaCoordination<calculateFloat>::calculate() {
     myPBC.invZ = 1.0 / myPBC.Z;
 
     getCoordOrthoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>>(
-        nat, switchingParameters, myPBC, cudaPositions.pointer(),
-        cudaTrueIndexes.pointer(), cudaCoordination.pointer(),
-        cudaDerivatives.pointer(), cudaVirial.pointer());
+        nat, switchingParameters, myPBC,
+        thrust::raw_pointer_cast(cudaPositions.data()),
+        thrust::raw_pointer_cast(cudaTrueIndexes.data()),
+        thrust::raw_pointer_cast(cudaCoordination.data()),
+        thrust::raw_pointer_cast(cudaDerivatives.data()),
+        thrust::raw_pointer_cast(cudaVirial.data()));
   } else {
     getCoordNoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>>(
-        nat, switchingParameters, myPBC, cudaPositions.pointer(),
-        cudaTrueIndexes.pointer(), cudaCoordination.pointer(),
-        cudaDerivatives.pointer(), cudaVirial.pointer());
+        nat, switchingParameters, myPBC,
+        thrust::raw_pointer_cast(cudaPositions.data()),
+        thrust::raw_pointer_cast(cudaTrueIndexes.data()),
+        thrust::raw_pointer_cast(cudaCoordination.data()),
+        thrust::raw_pointer_cast(cudaDerivatives.data()),
+        thrust::raw_pointer_cast(cudaVirial.data()));
   }
 
   /**************************accumulating the results**************************/
 
   cudaDeviceSynchronize();
-
-  cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
+  {
+    thrust::host_vector<calculateFloat> tdev = cudaDerivatives;
+    std::copy(tdev.data(), tdev.data() + 3 * nat, &deriv[0][0]);
+    // cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
+  }
   auto N = nat;
 
   while (N > 1) {
@@ -541,17 +554,21 @@ void CudaCoordination<calculateFloat>::calculate() {
     reductionMemoryVirial.resize(9 * nGroups);
 
     dim3 ngroupsVirial(nGroups, 9);
-    CUDAHELPERS::doReductionND(cudaVirial.pointer(),
-                               reductionMemoryVirial.pointer(), N,
-                               ngroupsVirial, runningThreads, streamVirial);
+    CUDAHELPERS::doReductionND(
+        thrust::raw_pointer_cast(cudaVirial.data()),
+        thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
+        ngroupsVirial, runningThreads, streamVirial);
 
-    CUDAHELPERS::doReduction1D(cudaCoordination.pointer(),
-                               reductionMemoryCoord.pointer(), N, nGroups,
-                               runningThreads, streamCoordination);
+    CUDAHELPERS::doReduction1D(
+        thrust::raw_pointer_cast(cudaCoordination.data()),
+        thrust::raw_pointer_cast(reductionMemoryCoord.data()), N, nGroups,
+        runningThreads, streamCoordination);
 
     if (nGroups == 1) {
-      reductionMemoryVirial.copyFromCuda(&virial[0][0], streamVirial);
-      reductionMemoryCoord.copyFromCuda(&coordination, streamCoordination);
+      thrust::host_vector<calculateFloat> tvir = reductionMemoryVirial;
+      std::copy(tvir.data(), tvir.data() + 9, &virial[0][0]);
+      // reductionMemoryVirial.copyFromCuda(&virial[0][0], streamVirial);
+      coordination = reductionMemoryCoord[0];
     } else {
       reductionMemoryCoord.swap(cudaCoordination);
       reductionMemoryVirial.swap(cudaVirial);
@@ -560,9 +577,9 @@ void CudaCoordination<calculateFloat>::calculate() {
     N = nGroups;
   }
   // in this way we do not resize with additional memory allocation
-  if (reductionMemoryCoord.reserved() > cudaCoordination.reserved())
+  if (reductionMemoryCoord.size() > cudaCoordination.size())
     reductionMemoryCoord.swap(cudaCoordination);
-  if (reductionMemoryVirial.reserved() > cudaVirial.reserved())
+  if (reductionMemoryVirial.size() > cudaVirial.size())
     reductionMemoryVirial.swap(cudaVirial);
   // this ensures that the memory is fully in the host ram
   cudaDeviceSynchronize();
