@@ -79,6 +79,56 @@ CUDACOORDINATION GROUPA=group R_0=0.3
 */
 //+ENDPLUMEDOC
 
+void plmdVectorToGPU(thrust::device_vector<double> &dvmem,
+                     std::vector<Vector> &data) {
+  const auto usedim_ = 3 * data.size();
+
+  // std::cerr << "doubleplmdVectorToGPU\n";
+  dvmem.resize(usedim_);
+  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), &data[0][0],
+             usedim_ * sizeof(double), cudaMemcpyHostToDevice);
+  //  cudaMemcpyAsync(thrust::raw_pointer_cast(dvmem.data()), data.data(),
+  //  usedim_ * sizeof(double), cudaMemcpyHostToDevice,stream);
+}
+
+void plmdVectorToGPU(thrust::device_vector<float> &dvmem,
+                     std::vector<Vector> &data) {
+  const auto usedim_ = 3 * data.size();
+  // std::cerr << "floatplmdVectorToGPU\n";
+  dvmem.resize(usedim_);
+  std::vector<float> tempMemory(3 * data.size());
+  // std::copy(tempMemory.data(), tempMemory.data() + usedim_, &data[0][0]);
+  for (auto i = 0u; i < data.size(); ++i) {
+    tempMemory[3 * i] = data[i][0];
+    tempMemory[3 * i + 1] = data[i][1];
+    tempMemory[3 * i + 2] = data[i][2];
+  }
+  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
+             usedim_ * sizeof(float), cudaMemcpyHostToDevice);
+  //  cudaMemcpyAsync(thrust::raw_pointer_cast(dvmem.data()), data.data(),
+  //  usedim_ * sizeof(double), cudaMemcpyHostToDevice,stream);
+}
+
+void plmdVectorFromGPU(thrust::device_vector<float> &dvmem,
+                       std::vector<Vector> &data) {
+  const auto usedim_ = 3 * data.size();
+  std::vector<double> tempMemory(usedim_);
+  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
+             usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+  for (auto i = 0u; i < usedim_; ++i)
+    (&data[0][0])[i] = tempMemory[i];
+}
+
+void plmdVectorFromGPU(thrust::device_vector<double> &dvmem,
+                       std::vector<Vector> &data) {
+  const auto usedim_ = 3 * data.size();
+  std::vector<double> tempMemory(usedim_);
+  cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
+             usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+}
+
 // these constant will be used within the kernels
 template <typename calculateFloat> struct rationalSwitchParameters {
   calculateFloat dmaxSQ = std::numeric_limits<calculateFloat>::max();
@@ -123,7 +173,7 @@ template <> __device__ float pbcClamp<float>(float x) {
 // does not inherit from coordination base because nl is private
 template <typename calculateFloat> class CudaCoordination : public Colvar {
   /// the pointer to the coordinates on the GPU
-  // thrust::device_vector<calculateFloat> cudaPositions;
+  thrust::device_vector<calculateFloat> cudaPositions;
   /// the pointer to the nn list on the GPU
   thrust::device_vector<calculateFloat> cudaCoordination;
   thrust::device_vector<calculateFloat> cudaDerivatives;
@@ -158,7 +208,7 @@ PLUMED_REGISTER_ACTION(CudaCoordination_f, "CUDACOORDINATIONFLOAT")
 template <typename calculateFloat>
 void CudaCoordination<calculateFloat>::setUpPermanentGPUMemory() {
   auto nat = getPositions().size();
-  // cudaPositions.resize(3 * nat);
+  cudaPositions.resize(3 * nat);
   cudaDerivatives.resize(3 * nat);
   cudaTrueIndexes.resize(nat);
   std::vector<unsigned> trueIndexes(nat);
@@ -490,8 +540,9 @@ void CudaCoordination<calculateFloat>::calculate() {
   auto positions = getPositions();
   auto nat = positions.size();
   /***************************copying data on the GPU**************************/
-  thrust::device_vector<calculateFloat> cudaPositions(
-      &positions[0][0], &positions[0][0] + nat * 3);
+  // thrust::device_vector<calculateFloat> cudaPositions(
+  //     &positions[0][0], &positions[0][0] + nat * 3);
+  plmdVectorToGPU(cudaPositions, positions);
   /***************************copying data on the GPU**************************/
 
   Tensor virial;

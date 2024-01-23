@@ -19,3 +19,6 @@ Coordination.$(soext): ndReduction.o Coordination.o
 clean:
 	@rm -fv Coordination.$(soext) ndReduction.o Coordination.o 
 
+check: all
+	$(MAKE) -C regtest testclean
+	$(MAKE) -C regtest checkfail
