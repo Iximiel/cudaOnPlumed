@@ -98,10 +98,16 @@ void plmdVectorToGPU(thrust::device_vector<float> &dvmem,
   dvmem.resize(usedim_);
   std::vector<float> tempMemory(3 * data.size());
   // std::copy(tempMemory.data(), tempMemory.data() + usedim_, &data[0][0]);
-  for (auto i = 0u; i < data.size(); ++i) {
-    tempMemory[3 * i] = data[i][0];
-    tempMemory[3 * i + 1] = data[i][1];
-    tempMemory[3 * i + 2] = data[i][2];
+  // for (auto i = 0u; i < data.size(); ++i) {
+  //   tempMemory[3 * i] = data[i][0];
+  //   tempMemory[3 * i + 1] = data[i][1];
+  //   tempMemory[3 * i + 2] = data[i][2];
+  // }
+  for (auto i = 0u; i < usedim_; ++i) {
+    // this has no right to work x'D , but indeed it works,
+    // tempMemory[i] = (&data[0][0])[i];
+    // If I write it like this, it looks like I know what I am doing
+    tempMemory[i] = *(static_cast<double *>(&data[0][0]) + i);
   }
   cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
              usedim_ * sizeof(float), cudaMemcpyHostToDevice);
@@ -112,18 +118,18 @@ void plmdVectorToGPU(thrust::device_vector<float> &dvmem,
 void plmdVectorFromGPU(thrust::device_vector<float> &dvmem,
                        std::vector<Vector> &data) {
   const auto usedim_ = 3 * data.size();
-  std::vector<double> tempMemory(usedim_);
+  std::vector<float> tempMemory(usedim_);
   cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
              usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
   //  cudaMemcpyAsync
-  for (auto i = 0u; i < usedim_; ++i)
+  for (auto i = 0u; i < usedim_; ++i) {
     (&data[0][0])[i] = tempMemory[i];
+  }
 }
 
 void plmdVectorFromGPU(thrust::device_vector<double> &dvmem,
                        std::vector<Vector> &data) {
   const auto usedim_ = 3 * data.size();
-  std::vector<double> tempMemory(usedim_);
   cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
              usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
   //  cudaMemcpyAsync
@@ -591,9 +597,10 @@ void CudaCoordination<calculateFloat>::calculate() {
 
   cudaDeviceSynchronize();
   {
-    thrust::host_vector<calculateFloat> tdev = cudaDerivatives;
-    std::copy(tdev.data(), tdev.data() + 3 * nat, &deriv[0][0]);
+    // thrust::host_vector<calculateFloat> tdev = cudaDerivatives;
+    // std::copy(tdev.data(), tdev.data() + 3 * nat, &deriv[0][0]);
     // cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
+    plmdVectorFromGPU(cudaDerivatives, deriv);
   }
   auto N = nat;
 
