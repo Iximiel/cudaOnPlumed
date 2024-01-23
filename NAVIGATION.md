@@ -17,7 +17,7 @@ Implementation <==> Helpers
 Intro ==> Helpers
 
 
-click Intro "Navigation.md" "The introduction"
+click Intro "NAVIGATION.md" "The introduction"
 click Implementation "Implementation.md" "The coordination implementation"
 click Helpers "Helpers.md" "A simple manual witht the helper library"
 ```
