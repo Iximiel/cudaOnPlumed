@@ -21,8 +21,8 @@
 #include "plumed/tools/NeighborList.h"
 #include "plumed/tools/SwitchingFunction.h"
 
-#include "cudaHelpers.cuh"
-#include "ndReduction.h"
+
+#include <thrust/device_vector.h>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
@@ -120,14 +120,14 @@ template <> __device__ float pbcClamp<float>(float x) {
 // does not inherit from coordination base because nl is private
 template <typename calculateFloat> class CudaCoordination : public Colvar {
   /// the pointer to the coordinates on the GPU
-  CUDAHELPERS::memoryHolder<calculateFloat> cudaPositions;
+  thrust::device_vector<calculateFloat> cudaPositions;
   /// the pointer to the nn list on the GPU
-  CUDAHELPERS::memoryHolder<calculateFloat> cudaCoordination;
-  CUDAHELPERS::memoryHolder<calculateFloat> cudaDerivatives;
-  CUDAHELPERS::memoryHolder<calculateFloat> cudaVirial;
-  CUDAHELPERS::memoryHolder<calculateFloat> reductionMemoryVirial;
-  CUDAHELPERS::memoryHolder<calculateFloat> reductionMemoryCoord;
-  CUDAHELPERS::memoryHolder<unsigned> cudaTrueIndexes;
+  thrust::device_vector<calculateFloat> cudaCoordination;
+  thrust::device_vector<calculateFloat> cudaDerivatives;
+  thrust::device_vector<calculateFloat> cudaVirial;
+  thrust::device_vector<calculateFloat> reductionMemoryVirial;
+  thrust::device_vector<calculateFloat> reductionMemoryCoord;
+  thrust::device_vector<unsigned> cudaTrueIndexes;
 
   cudaStream_t streamDerivatives;
   cudaStream_t streamVirial;
@@ -319,10 +319,10 @@ CudaCoordination<calculateFloat>::CudaCoordination(const ActionOptions &ao)
     if (dostretch) {
       std::vector<calculateFloat> inputs = {0.0, dmax * invr0};
 
-      CUDAHELPERS::memoryHolder<calculateFloat> inputZeroMax(2);
+      thrust::device_vector<calculateFloat> inputZeroMax(2);
       inputZeroMax.copyToCuda(inputs.data());
-      CUDAHELPERS::memoryHolder<calculateFloat> dummydfunc(2);
-      CUDAHELPERS::memoryHolder<calculateFloat> resZeroMax(2);
+      thrust::device_vector<calculateFloat> dummydfunc(2);
+      thrust::device_vector<calculateFloat> resZeroMax(2);
 
       getpcuda_Rational<<<1, 2>>>(inputZeroMax.pointer(), nn_, mm_,
                                   dummydfunc.pointer(), resZeroMax.pointer());
