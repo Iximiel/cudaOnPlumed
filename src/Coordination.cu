@@ -438,7 +438,7 @@ calculateSqr(const calculateFloat distancesq,
 }
 
 template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
-__global__ void BlockReduceKernel(int num_valid,
+__global__ void reduction1DKernel(int num_valid,
                                   calculateFloat *d_in, // Tile of input
                                   calculateFloat *d_out // Tile aggregate
 
@@ -460,6 +460,31 @@ __global__ void BlockReduceKernel(int num_valid,
     d_out[blockIdx.x] = aggregate;
   }
 }
+
+template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void reductionNDKernel(int num_valid,
+                                  calculateFloat *d_in, // Tile of input
+                                  calculateFloat *d_out // Tile aggregate
+
+) {
+  // Specialize BlockReduce type for our thread block
+  using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+  int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  // Per-thread tile data
+  calculateFloat data[ITEMS_PER_THREAD] = {0.0, 0.0, 0.0, 0.0};
+  cub::LoadDirectBlocked(data_id, d_in + blockIdx.y * num_valid, data,
+                         num_valid);
+  // Compute sum
+  calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
+
+  // Store aggregate and elapsed clocks
+  if (threadIdx.x == 0) {
+    printf("CUDA: %i (%i) %f\n", blockIdx.x, blockDim.x, aggregate);
+    d_out[blockIdx.x + blockIdx.y * gridDim.x] = aggregate;
+  }
+}
 constexpr unsigned dataperthread = 4;
 template <typename T, unsigned THREADS = 1024>
 void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
@@ -468,7 +493,7 @@ void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
     // by using this "if constexpr" I do not need to add a specialized
     // declaration to end the loop
     if (nthreads == THREADS) {
-      BlockReduceKernel<T, THREADS, dataperthread>
+      reduction1DKernel<T, THREADS, dataperthread>
           <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
                                                      outputArray);
     } else {
@@ -486,6 +511,33 @@ void cubDoReduction1D(T *inputArray, T *outputArray, const unsigned int len,
                       const unsigned blocks, const unsigned nthreads) {
 
   cubDoReduction1D_t(inputArray, outputArray, len, blocks, nthreads);
+}
+
+template <typename T, unsigned THREADS = 1024>
+void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
+                        const dim3 blocks, const unsigned nthreads) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reductionNDKernel<T, THREADS, dataperthread>
+          <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
+                                                     outputArray);
+    } else {
+      cubDoReductionND_t<T, THREADS / 2>(inputArray, outputArray, len, blocks,
+                                         nthreads);
+    }
+  } else {
+    plumed_merror(
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+template <typename T>
+void cubDoReductionND(T *inputArray, T *outputArray, const unsigned int len,
+                      const dim3 blocks, const unsigned nthreads) {
+
+  cubDoReductionND_t(inputArray, outputArray, len, blocks, nthreads);
 }
 
 #define X(I) 3 * I
@@ -664,15 +716,15 @@ void CudaCoordination<calculateFloat>::calculate() {
 
   while (N > 1) {
     size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
-    unsigned nGroups = CUDAHELPERS::idealGroups(N, runningThreads);
+
+    unsigned nGroups = ceil(double(N) / (runningThreads * dataperthread));
 
     reductionMemoryVirial.resize(9 * nGroups);
 
     dim3 ngroupsVirial(nGroups, 9);
-    CUDAHELPERS::doReductionND(
-        thrust::raw_pointer_cast(cudaVirial.data()),
-        thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
-        ngroupsVirial, runningThreads, streamVirial);
+    cubDoReductionND(thrust::raw_pointer_cast(cudaVirial.data()),
+                     thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
+                     ngroupsVirial, runningThreads);
 
     if (nGroups == 1) {
       thrust::host_vector<calculateFloat> tvir = reductionMemoryVirial;
@@ -691,9 +743,7 @@ void CudaCoordination<calculateFloat>::calculate() {
 
   while (N > 1) {
     size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
-    // unsigned nGroups = CUDAHELPERS::idealGroups(N, runningThreads);
-    // constexpr unsigned nthreads = NT;
-    log.printf("maxNT:%i\n", maxNumThreads);
+
     unsigned nGroups = ceil(double(N) / (runningThreads * dataperthread));
 
     reductionMemoryCoord.resize(nGroups);
