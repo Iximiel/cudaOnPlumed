@@ -24,6 +24,8 @@
 #include "cudaHelpers.cuh"
 #include "ndReduction.h"
 
+#include <cub/block/block_load.cuh>
+#include <cub/block/block_reduce.cuh>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
@@ -106,7 +108,7 @@ void plmdVectorToGPU(thrust::device_vector<float> &dvmem,
   for (auto i = 0u; i < usedim_; ++i) {
     // this has no right to work x'D , but indeed it works,
     // tempMemory[i] = (&data[0][0])[i];
-    // If I write it like this, it looks like I know what I am doing
+    // But, if I write it like this, it looks like I know what I am doing
     tempMemory[i] = *(static_cast<double *>(&data[0][0]) + i);
   }
   cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
@@ -159,7 +161,7 @@ __device__ calculateFloat pbcClamp(calculateFloat x) {
   return 0.0;
 }
 
-template <> __device__ double pbcClamp<double>(double x) {
+template <> __device__ __forceinline__ double pbcClamp<double>(double x) {
   // convert a double to a signed int in round-to-nearest-even mode.
   return __double2int_rn(x) - x;
   // return x - floor(x+0.5);
@@ -169,7 +171,7 @@ template <> __device__ double pbcClamp<double>(double x) {
   // return nearbyint(x) - x;
 }
 
-template <> __device__ float pbcClamp<float>(float x) {
+template <> __device__ __forceinline__ float pbcClamp<float>(float x) {
   // convert a double to a signed int in round-to-nearest-even mode.
   return __float2int_rn(x) - x;
   // return x - floorf(x+0.5f);
@@ -241,7 +243,8 @@ void CudaCoordination<calculateFloat>::registerKeywords(Keywords &keys) {
 }
 
 template <typename calculateFloat>
-__device__ calculateFloat pcuda_fastpow(calculateFloat base, int expo) {
+__device__ __forceinline__ calculateFloat pcuda_fastpow(calculateFloat base,
+                                                        int expo) {
   if (expo < 0) {
     expo = -expo;
     base = 1.0 / base;
@@ -268,9 +271,9 @@ template <> constexpr __device__ double pcuda_eps<double>() {
 }
 
 template <typename calculateFloat>
-__device__ calculateFloat pcuda_Rational(const calculateFloat rdist,
-                                         const int NN, const int MM,
-                                         calculateFloat &dfunc) {
+__device__ __forceinline__ calculateFloat
+pcuda_Rational(const calculateFloat rdist, const int NN, const int MM,
+               calculateFloat &dfunc) {
   calculateFloat result;
   if (2 * NN == MM) {
     // if 2*N==M, then (1.0-rdist^N)/(1.0-rdist^M) = 1.0/(1.0+rdist^N)
@@ -415,7 +418,7 @@ CudaCoordination<calculateFloat>::~CudaCoordination() {
 }
 
 template <typename calculateFloat>
-__device__ calculateFloat
+__device__ __forceinline__ calculateFloat
 calculateSqr(const calculateFloat distancesq,
              const rationalSwitchParameters<calculateFloat> switchingParameters,
              calculateFloat &dfunc) {
@@ -432,6 +435,65 @@ calculateSqr(const calculateFloat distancesq,
     dfunc *= switchingParameters.stretch;
   }
   return result;
+}
+
+template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void BlockReduceKernel(int num_valid,
+                                  calculateFloat *d_in, // Tile of input
+                                  calculateFloat *d_out // Tile aggregate
+
+) {
+  // Specialize BlockReduce type for our thread block
+  using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+  int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  // Per-thread tile data
+  calculateFloat data[ITEMS_PER_THREAD];
+  cub::LoadDirectBlocked(data_id, d_in, data, num_valid);
+  // Compute sum
+  calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
+
+  // Store aggregate and elapsed clocks
+  if (threadIdx.x == 0) {
+    printf("CUDA: %i (%i) %f\n", blockIdx.x, blockDim.x, aggregate);
+    d_out[blockIdx.x] = aggregate;
+  }
+}
+constexpr unsigned dataperthread = 4;
+template <typename T, unsigned THREADS = 1024>
+void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
+                        const unsigned blocks, const unsigned nthreads) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized template
+    // to end the loop
+    if (nthreads == THREADS) {
+      BlockReduceKernel<T, THREADS, dataperthread>
+          <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
+                                                     outputArray);
+    } else {
+      cubDoReduction1D_t<T, THREADS / 2>(inputArray, outputArray, len, blocks,
+                                         nthreads);
+    }
+  } else {
+    plumed_merror(
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+#define NT 128
+template <typename T>
+void cubDoReduction1D(T *inputArray, T *outputArray, const unsigned int len,
+                      const unsigned /*blocks*/, const unsigned /*nthreads*/) {
+  constexpr unsigned nthreads = NT;
+
+  unsigned blocks = ceil(double(len) / (nthreads * dataperthread));
+
+  cubDoReduction1D_t(inputArray, outputArray, len, blocks, nthreads);
+
+  // BlockReduceKernel<T, nthreads, dataperthread>
+  //     <<<blocks, nthreads, nthreads * sizeof(T)>>>(len, inputArray,
+  //                                                  outputArray);
 }
 
 #define X(I) 3 * I
@@ -488,11 +550,10 @@ getCoord(const unsigned nat,
     // const unsigned xyz = threadIdx.z
     // where the third dim is 0 1 2 ^
     // ?
-    if (usePBC) {
+    if constexpr (usePBC) {
       d_0 = pbcClamp((coordinates[X(j)] - x) * myPBC.invX) * myPBC.X;
       d_1 = pbcClamp((coordinates[Y(j)] - y) * myPBC.invY) * myPBC.Y;
       d_2 = pbcClamp((coordinates[Z(j)] - z) * myPBC.invZ) * myPBC.Z;
-
     } else {
       d_0 = coordinates[X(j)] - x;
       d_1 = coordinates[Y(j)] - y;
@@ -545,11 +606,13 @@ template <typename calculateFloat>
 void CudaCoordination<calculateFloat>::calculate() {
   auto positions = getPositions();
   auto nat = positions.size();
-  /***************************copying data on the GPU**************************/
+  /***************************copying data on the
+   * GPU**************************/
   // thrust::device_vector<calculateFloat> cudaPositions(
   //     &positions[0][0], &positions[0][0] + nat * 3);
   plmdVectorToGPU(cudaPositions, positions);
-  /***************************copying data on the GPU**************************/
+  /***************************copying data on the
+   * GPU**************************/
 
   Tensor virial;
   double coordination;
@@ -559,12 +622,14 @@ void CudaCoordination<calculateFloat>::calculate() {
 
   unsigned ngroups = ceil(double(nat) / maxNumThreads);
 
-  /**********************allocating the memory on the GPU**********************/
+  /**********************allocating the memory on the
+   * GPU**********************/
   cudaCoordination.resize(nat);
   cudaVirial.resize(nat * 9);
-  /**************************starting the calculations*************************/
-  // this calculates the derivatives and prepare the coordination and the virial
-  // for the accumulation
+  /**************************starting the
+   * calculations*************************/
+  // this calculates the derivatives and prepare the coordination and the
+  // virial for the accumulation
   if (pbc) {
     // Only ortho as now
     auto box = getBox();
@@ -593,7 +658,8 @@ void CudaCoordination<calculateFloat>::calculate() {
         thrust::raw_pointer_cast(cudaVirial.data()));
   }
 
-  /**************************accumulating the results**************************/
+  /**************************accumulating the
+   * results**************************/
 
   cudaDeviceSynchronize();
   {
@@ -608,7 +674,6 @@ void CudaCoordination<calculateFloat>::calculate() {
     size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
     unsigned nGroups = CUDAHELPERS::idealGroups(N, runningThreads);
 
-    reductionMemoryCoord.resize(nGroups);
     reductionMemoryVirial.resize(9 * nGroups);
 
     dim3 ngroupsVirial(nGroups, 9);
@@ -617,19 +682,37 @@ void CudaCoordination<calculateFloat>::calculate() {
         thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
         ngroupsVirial, runningThreads, streamVirial);
 
-    CUDAHELPERS::doReduction1D(
-        thrust::raw_pointer_cast(cudaCoordination.data()),
-        thrust::raw_pointer_cast(reductionMemoryCoord.data()), N, nGroups,
-        runningThreads, streamCoordination);
-
     if (nGroups == 1) {
       thrust::host_vector<calculateFloat> tvir = reductionMemoryVirial;
       std::copy(tvir.data(), tvir.data() + 9, &virial[0][0]);
       // reductionMemoryVirial.copyFromCuda(&virial[0][0], streamVirial);
+
+    } else {
+
+      reductionMemoryVirial.swap(cudaVirial);
+    }
+
+    N = nGroups;
+  }
+
+  N = nat;
+
+  while (N > 1) {
+    size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
+    // unsigned nGroups = CUDAHELPERS::idealGroups(N, runningThreads);
+    unsigned nGroups = ceil(double(N) / (NT * 4));
+
+    reductionMemoryCoord.resize(nGroups);
+
+    cubDoReduction1D(thrust::raw_pointer_cast(cudaCoordination.data()),
+                     thrust::raw_pointer_cast(reductionMemoryCoord.data()), N,
+                     nGroups, runningThreads);
+
+    if (nGroups == 1) {
+
       coordination = reductionMemoryCoord[0];
     } else {
       reductionMemoryCoord.swap(cudaCoordination);
-      reductionMemoryVirial.swap(cudaVirial);
     }
 
     N = nGroups;
