@@ -19,207 +19,131 @@
 #ifndef __PLUMED_cuda_helpers_cuh
 #define __PLUMED_cuda_helpers_cuh
 
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
+#include "plumed/tools/Tensor.h"
+#include "plumed/tools/Vector.h"
+#include <thrust/device_vector.h>
 #include <vector>
-
 namespace CUDAHELPERS {
 
-template <class T> __device__ constexpr const T &mymin(const T &a, const T &b) {
-  return (b < a) ? b : a;
+// the two dim classes are placeholders
+template <unsigned n> constexpr unsigned dim(PLMD::VectorGeneric<n>) {
+  return n;
 }
 
-// this make possible to use shared memorywithin a templated kernel
-template <typename T> __device__ T *shared_memory_proxy() {
-  // do we need an __align__() here?
-  extern __shared__ unsigned char memory[];
-  return reinterpret_cast<T *>(memory);
+template <unsigned n, unsigned m>
+constexpr unsigned dim(PLMD::TensorGeneric<n, m>) {
+  return n * m;
 }
 
-// onlymoveable helper
-template <typename T> class memoryHolder {
-  T *pointer_{nullptr};
-  // the dimension in memory
-  unsigned dim_{0};
-  // the used part of the array
-  unsigned usedim_{0};
+template <typename T>
+inline double *cast_to_simple_pointer(std::vector<T> &data) {
+  return static_cast<double *>(&data[0][0]);
+}
 
-public:
-  memoryHolder() {}
-  memoryHolder(memoryHolder &other) = delete;
-  memoryHolder(memoryHolder &&other)
-      : pointer_(other.pointer_), dim_(other.dim_), usedim_(other.usedim_) {
-    other.pointer_ = nullptr;
-  }
-  memoryHolder(const unsigned newDim) : dim_(newDim), usedim_(newDim) {
-    cudaMalloc(&pointer_, dim_ * sizeof(T));
-  }
-  memoryHolder &operator=(memoryHolder &&other) {
-    pointer_ = other.pointer_;
-    dim_ = other.dim_;
-    usedim_ = other.usedim_;
-    other.pointer_ = nullptr;
-    other.dim_ = 0;
-    other.usedim_ = 0;
-    return *this;
-  }
+template <typename T>
+inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
+                          std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
+  dvmem.resize(usedim_);
+  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), &data[0][0],
+             usedim_ * sizeof(double), cudaMemcpyHostToDevice);
+}
 
-  ~memoryHolder() { cudaFree(pointer_); }
-  T *pointer() { return pointer_; }
-  unsigned size() const { return usedim_; }
-  unsigned reserved() const { return dim_; }
-  void /*CUresult*/ resize(const unsigned newDim, bool keepData = false) {
+template <typename T>
+inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
+                          std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
+  dvmem.resize(usedim_);
+  std::vector<float> tempMemory(3 * data.size());
+  for (auto i = 0u; i < usedim_; ++i) {
+    tempMemory[i] = cast_to_simple_pointer(data)[i];
+  }
+  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
+             usedim_ * sizeof(float), cudaMemcpyHostToDevice);
+}
 
-    if (newDim > dim_) {
-      T *new_ptr = nullptr;
-      cudaMalloc(&new_ptr, newDim * sizeof(T));
-      if (keepData && pointer_) {
-        // copy the old data into the new pointer
-        cudaMemcpy(new_ptr, pointer_, usedim_ * sizeof(T),
-                   cudaMemcpyDeviceToDevice);
-      }
-      cudaFree(pointer_);
-      pointer_ = new_ptr;
-      dim_ = newDim;
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
+                            std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
+  std::vector<float> tempMemory(usedim_);
+  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
+             usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+  for (auto i = 0u; i < usedim_; ++i) {
+    cast_to_simple_pointer(data)[i] = tempMemory[i];
+  }
+}
+
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
+                            std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
+  cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
+             usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+}
+
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem, T &data) {
+  auto usedim_ = dim(data);
+  std::vector<float> tempMemory(usedim_);
+  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
+             usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+  for (auto i = 0u; i < usedim_; ++i) {
+    *(static_cast<double *>(&data[0][0]) + i) = tempMemory[i];
+  }
+}
+
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem, T &data) {
+  auto usedim_ = dim(data);
+  cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
+             usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+}
+
+// after c++14 the template activation will be shorter to write:
+// template<typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
+
+/// finds the nearest upper multiple of the given reference
+template <typename T, typename std::enable_if<std::is_integral<T>::value,
+                                              bool>::type = true>
+inline T nearestUpperMultipleTo(T number, T reference) {
+  return ((number - 1) | (reference - 1)) + 1;
+}
+
+/// We'll find the ideal number of blocks using the Brent's theorem
+size_t idealGroups(size_t numberOfElements, size_t runningThreads) {
+  // nearest upper multiple to the numberof threads
+  const size_t nnToGPU =
+      nearestUpperMultipleTo(numberOfElements, runningThreads);
+  /// Brent’s theorem says each thread should sum O(log n) elements
+  // https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
+  // const size_t elementsPerThread=log2(runningThreads);
+  const size_t expectedTotalThreads = ceil(nnToGPU / log2(runningThreads));
+  // hence the blocks should have this size:
+  const unsigned ngroups =
+      nearestUpperMultipleTo(expectedTotalThreads, runningThreads) /
+      runningThreads;
+  return ngroups;
+}
+
+size_t threadsPerBlock(unsigned N, unsigned maxNumThreads) {
+  // this seeks the minimum number of threads to use a sigle block (and end the
+  // recursion)
+  size_t dim = 32;
+  for (dim = 32; dim < 1024; dim <<= 1) {
+    if (maxNumThreads < dim) {
+      dim >>= 1;
+      break;
     }
-    usedim_ = newDim;
-  }
-  void /*CUresult*/ reserve(const unsigned newDim, bool keepData = false) {
-    if (newDim > dim_) {
-      T *new_ptr = nullptr;
-      cudaMalloc(&new_ptr, newDim * sizeof(T));
-      if (keepData && pointer_) {
-        // copy the old data into the new pointer
-        cudaMemcpy(new_ptr, pointer_, usedim_ * sizeof(T));
-      }
-      cudaFree(pointer_);
-      pointer_ = new_ptr;
-      dim_ = newDim;
-    }
-  }
-
-  void /*CUresult*/ copyToCuda(T *cpupointer) {
-    cudaMemcpy(pointer_, cpupointer, usedim_ * sizeof(T),
-               cudaMemcpyHostToDevice);
-  }
-
-  void /*CUresult*/ copyToCuda(T *cpupointer, cudaStream_t stream) {
-    cudaMemcpyAsync(pointer_, cpupointer, usedim_ * sizeof(T),
-                    cudaMemcpyHostToDevice, stream);
-  }
-
-  void /*CUresult*/ copyFromCuda(T *cpupointer) {
-    cudaMemcpy(cpupointer, pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-  }
-
-  void /*CUresult*/ copyFromCuda(T *cpupointer, cudaStream_t stream) {
-    cudaMemcpyAsync(cpupointer, pointer_, usedim_ * sizeof(T),
-                    cudaMemcpyDeviceToHost, stream);
-  }
-
-  //*conversions*/
-  // using vector to avoid memory leaks
-  template <typename Y> void /*CUresult*/ copyToCuda(Y *cpupointer) {
-    std::vector<T> tempMemory(usedim_);
-    for (auto i = 0u; i < usedim_; ++i)
-      tempMemory[i] = cpupointer[i];
-
-    cudaMemcpy(pointer_, tempMemory.data(), usedim_ * sizeof(T),
-               cudaMemcpyHostToDevice);
-  }
-
-  template <typename Y>
-  void /*CUresult*/ copyToCuda(Y *cpupointer, cudaStream_t stream) {
-    std::vector<T> tempMemory(usedim_);
-    for (auto i = 0u; i < usedim_; ++i)
-      tempMemory[i] = cpupointer[i];
-
-    cudaMemcpyAsync(pointer_, tempMemory.data(), usedim_ * sizeof(T),
-                    cudaMemcpyHostToDevice, stream);
-  }
-
-  template <typename Y> void /*CUresult*/ copyFromCuda(Y *cpupointer) {
-    std::vector<T> tempMemory(usedim_);
-    cudaMemcpy(tempMemory.data(), pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-    for (auto i = 0u; i < usedim_; ++i)
-      cpupointer[i] = tempMemory[i];
-  }
-
-  template <typename Y>
-  void /*CUresult*/ copyFromCuda(Y *cpupointer, cudaStream_t) {
-    std::vector<T> tempMemory(usedim_);
-    cudaMemcpy(tempMemory.data(), pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-    // not async because there is a conversion on the cpu pointer
-    for (auto i = 0u; i < usedim_; ++i)
-      cpupointer[i] = tempMemory[i];
-  }
-  /**/
-
-  void swap(memoryHolder &other) {
-    std::swap(this->pointer_, other.pointer_);
-    std::swap(this->dim_, other.dim_);
-    std::swap(this->usedim_, other.usedim_);
-  }
-};
-
-/// @brief This is the "body" of th ereduction algorithm: you should prepare the
-/// shared memory and the plug it in this, due to the templated numthreads most
-/// of the if are done at compile time
-template <unsigned numThreads, typename T>
-__device__ void reductor(volatile T *sdata, T *outputArray,
-                         const unsigned int where) {
-  // this is an unrolled loop
-  const unsigned int tid = threadIdx.x;
-  if (numThreads >= 1024) { // compile time
-    if (tid < 512)
-      sdata[tid] += sdata[tid + 512];
-    __syncthreads();
-  }
-  if (numThreads >= 512) { // compile time
-    if (tid < 256)
-      sdata[tid] += sdata[tid + 256];
-    __syncthreads();
-  }
-  if (numThreads >= 256) { // compile time
-    if (tid < 128)
-      sdata[tid] += sdata[tid + 128];
-    __syncthreads();
-  }
-  if (numThreads >= 128) { // compile time
-    if (tid < 64)
-      sdata[tid] += sdata[tid + 64];
-    __syncthreads();
-  }
-  // a warp is composed by 32 threads that executes instructions syncrhonized,
-  // so no  need to use __syncthreads() for the last iterations;
-  if (tid < mymin(32u, numThreads / 2)) {
-    // warpReduce<numThreads>(sdata, tid);
-    if (numThreads >= 64) { // compile time
-      sdata[tid] += sdata[tid + 32];
-    }
-    if (numThreads >= 32) { // compile time
-      sdata[tid] += sdata[tid + 16];
-    }
-    if (numThreads >= 16) { // compile time
-      sdata[tid] += sdata[tid + 8];
-    }
-    if (numThreads >= 8) { // compile time
-      sdata[tid] += sdata[tid + 4];
-    }
-    if (numThreads >= 4) { // compile time
-      sdata[tid] += sdata[tid + 2];
-    }
-    if (numThreads >= 2) { // compile time
-      sdata[tid] += sdata[tid + 1];
+    if (N < dim) {
+      break;
     }
   }
-  // write result for this block to global memory
-  if (tid == 0) {
-    outputArray[where] = sdata[0];
-  }
+  return dim;
 }
 
 } // namespace CUDAHELPERS

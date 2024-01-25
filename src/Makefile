@@ -8,16 +8,18 @@ NVLDFLAGS = -dlto
 NV        = nvcc
 soext     = so
 
+OBJS:= Coordination.o
+
 all: Coordination.$(soext)
 
-%.o: %.cu ndReduction.h cudaHelpers.cuh
+%.o: %.cu cudaHelpers.cuh
 	$(NV) $(NVFLAGS) -ccbin $(compile) -o $@  $<
 
-Coordination.$(soext): ndReduction.o Coordination.o
+Coordination.$(soext): $(OBJS)
 	$(NV) -shared $(NVLDFLAGS) $(link) -o $@ $^
 
 clean:
-	@rm -fv Coordination.$(soext) ndReduction.o Coordination.o 
+	@rm -fv Coordination.$(soext) $(OBJS)
 
 check: all
 	$(MAKE) -C regtest

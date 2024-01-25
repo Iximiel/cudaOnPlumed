@@ -108,48 +108,6 @@ __global__ void reduction1D(T *inputArray, T *outputArray,
   reductor<numThreads>(sdata, outputArray, blockIdx.x);
 }
 
-// after c++14 the template activation will be shorter to write:
-// template<typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-
-/// finds the nearest upper multiple of the given reference
-template <typename T, typename std::enable_if<std::is_integral<T>::value,
-                                              bool>::type = true>
-inline T nearestUpperMultipleTo(T number, T reference) {
-  return ((number - 1) | (reference - 1)) + 1;
-}
-
-/// We'll find the ideal number of blocks using the Brent's theorem
-size_t idealGroups(size_t numberOfElements, size_t runningThreads) {
-  // nearest upper multiple to the numberof threads
-  const size_t nnToGPU =
-      nearestUpperMultipleTo(numberOfElements, runningThreads);
-  /// Brent’s theorem says each thread should sum O(log n) elements
-  // https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
-  // const size_t elementsPerThread=log2(runningThreads);
-  const size_t expectedTotalThreads = ceil(nnToGPU / log2(runningThreads));
-  // hence the blocks should have this size:
-  const unsigned ngroups =
-      nearestUpperMultipleTo(expectedTotalThreads, runningThreads) /
-      runningThreads;
-  return ngroups;
-}
-
-size_t threadsPerBlock(unsigned N, unsigned maxNumThreads) {
-  // this seeks the minimum number of threads to use a sigle block (and end the
-  // recursion)
-  size_t dim = 32;
-  for (dim = 32; dim < 1024; dim <<= 1) {
-    if (maxNumThreads < dim) {
-      dim >>= 1;
-      break;
-    }
-    if (N < dim) {
-      break;
-    }
-  }
-  return dim;
-}
-
 template <typename T>
 void callReduction1D(T *inputArray, T *outputArray, const unsigned int len,
                      const unsigned blocks, const unsigned nthreads) {

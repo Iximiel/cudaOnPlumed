@@ -22,7 +22,7 @@
 #include "plumed/tools/SwitchingFunction.h"
 
 #include "cudaHelpers.cuh"
-#include "ndReduction.h"
+// #include "ndReduction.h"
 
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_reduce.cuh>
@@ -80,82 +80,6 @@ CUDACOORDINATION GROUPA=group R_0=0.3
 
 */
 //+ENDPLUMEDOC
-
-template <unsigned n> constexpr unsigned dim(PLMD::VectorGeneric<n>) {
-  return n;
-}
-
-template <unsigned n, unsigned m>
-constexpr unsigned dim(PLMD::TensorGeneric<n, m>) {
-  return n * m;
-}
-
-template <typename T>
-inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
-                          std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  dvmem.resize(usedim_);
-  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), &data[0][0],
-             usedim_ * sizeof(double), cudaMemcpyHostToDevice);
-}
-
-template <typename T>
-inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
-                          std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  dvmem.resize(usedim_);
-  std::vector<float> tempMemory(3 * data.size());
-  for (auto i = 0u; i < usedim_; ++i) {
-    // this has no right to work x'D , but indeed it works,
-    // tempMemory[i] = (&data[0][0])[i];
-    // But, if I write it like this, it looks like I know what I am doing
-    tempMemory[i] = *(static_cast<double *>(&data[0][0]) + i);
-  }
-  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
-             usedim_ * sizeof(float), cudaMemcpyHostToDevice);
-}
-
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
-                            std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  std::vector<float> tempMemory(usedim_);
-  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-  for (auto i = 0u; i < usedim_; ++i) {
-    *(static_cast<double *>(&data[0][0]) + i) = tempMemory[i];
-  }
-}
-
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
-                            std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-}
-
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem, T &data) {
-  auto usedim_ = dim(data);
-  std::vector<float> tempMemory(usedim_);
-  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-  for (auto i = 0u; i < usedim_; ++i) {
-    *(static_cast<double *>(&data[0][0]) + i) = tempMemory[i];
-  }
-}
-
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem, T &data) {
-  auto usedim_ = dim(data);
-  cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-}
 
 // these constant will be used within the kernels
 template <typename calculateFloat> struct rationalSwitchParameters {
@@ -675,7 +599,7 @@ void CudaCoordination<calculateFloat>::calculate() {
    * GPU**************************/
   // thrust::device_vector<calculateFloat> cudaPositions(
   //     &positions[0][0], &positions[0][0] + nat * 3);
-  plmdDataToGPU(cudaPositions, positions);
+  CUDAHELPERS::plmdDataToGPU(cudaPositions, positions);
   /***************************copying data on the
    * GPU**************************/
 
@@ -728,7 +652,7 @@ void CudaCoordination<calculateFloat>::calculate() {
 
   cudaDeviceSynchronize();
 
-  plmdDataFromGPU(cudaDerivatives, deriv);
+  CUDAHELPERS::plmdDataFromGPU(cudaDerivatives, deriv);
 
   auto N = nat;
 
@@ -750,7 +674,7 @@ void CudaCoordination<calculateFloat>::calculate() {
                      nGroups, runningThreads);
 
     if (nGroups == 1) {
-      plmdDataFromGPU(reductionMemoryVirial, virial);
+      CUDAHELPERS::plmdDataFromGPU(reductionMemoryVirial, virial);
       coordination = reductionMemoryCoord[0];
     } else {
       reductionMemoryVirial.swap(cudaVirial);
