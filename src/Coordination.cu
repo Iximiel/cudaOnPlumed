@@ -81,17 +81,28 @@ CUDACOORDINATION GROUPA=group R_0=0.3
 */
 //+ENDPLUMEDOC
 
-void plmdDataToGPU(thrust::device_vector<double> &dvmem,
-                   std::vector<Vector> &data) {
-  const auto usedim_ = 3 * data.size();
+template <unsigned n> constexpr unsigned dim(PLMD::VectorGeneric<n>) {
+  return n;
+}
+
+template <unsigned n, unsigned m>
+constexpr unsigned dim(PLMD::TensorGeneric<n, m>) {
+  return n * m;
+}
+
+template <typename T>
+inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
+                          std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
   dvmem.resize(usedim_);
   cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), &data[0][0],
              usedim_ * sizeof(double), cudaMemcpyHostToDevice);
 }
 
-void plmdDataToGPU(thrust::device_vector<float> &dvmem,
-                   std::vector<Vector> &data) {
-  const auto usedim_ = 3 * data.size();
+template <typename T>
+inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
+                          std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
   dvmem.resize(usedim_);
   std::vector<float> tempMemory(3 * data.size());
   for (auto i = 0u; i < usedim_; ++i) {
@@ -104,9 +115,10 @@ void plmdDataToGPU(thrust::device_vector<float> &dvmem,
              usedim_ * sizeof(float), cudaMemcpyHostToDevice);
 }
 
-void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
-                     std::vector<Vector> &data) {
-  const auto usedim_ = 3 * data.size();
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
+                            std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
   std::vector<float> tempMemory(usedim_);
   cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
              usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
@@ -116,16 +128,18 @@ void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
   }
 }
 
-void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
-                     std::vector<Vector> &data) {
-  const auto usedim_ = 3 * data.size();
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
+                            std::vector<T> &data) {
+  const auto usedim_ = dim(data[0]) * data.size();
   cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
              usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
   //  cudaMemcpyAsync
 }
 
-void plmdDataFromGPU(thrust::device_vector<float> &dvmem, Tensor &data) {
-  constexpr auto usedim_ = 9;
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem, T &data) {
+  auto usedim_ = dim(data);
   std::vector<float> tempMemory(usedim_);
   cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
              usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
@@ -135,8 +149,9 @@ void plmdDataFromGPU(thrust::device_vector<float> &dvmem, Tensor &data) {
   }
 }
 
-void plmdDataFromGPU(thrust::device_vector<double> &dvmem, Tensor &data) {
-  constexpr auto usedim_ = 9;
+template <typename T>
+inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem, T &data) {
+  auto usedim_ = dim(data);
   cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
              usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
   //  cudaMemcpyAsync
@@ -559,8 +574,9 @@ getCoord(const unsigned nat,
          calculateFloat *virialOut) {
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
-  if (i >= nat) // blocks are initializated with 'ceil (nat/threads)'
+  if (i >= nat) { // blocks are initializated with 'ceil (nat/threads)'
     return;
+  }
   // we try working with less global memory possible, so we set up a bunch of
   // temporary variables
   const unsigned idx = trueIndexes[i];
@@ -735,8 +751,6 @@ void CudaCoordination<calculateFloat>::calculate() {
 
     if (nGroups == 1) {
       plmdDataFromGPU(reductionMemoryVirial, virial);
-      // thrust::host_vector<calculateFloat> tvir = reductionMemoryVirial;
-      // std::copy(tvir.data(), tvir.data() + 9, &virial[0][0]);
       coordination = reductionMemoryCoord[0];
     } else {
       reductionMemoryVirial.swap(cudaVirial);
