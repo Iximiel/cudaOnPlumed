@@ -449,7 +449,7 @@ __global__ void BlockReduceKernel(int num_valid,
   __shared__ typename BlockReduceT::TempStorage temp_storage;
   int data_id = threadIdx.x + blockIdx.x * blockDim.x;
   // Per-thread tile data
-  calculateFloat data[ITEMS_PER_THREAD];
+  calculateFloat data[ITEMS_PER_THREAD] = {0.0, 0.0, 0.0, 0.0};
   cub::LoadDirectBlocked(data_id, d_in, data, num_valid);
   // Compute sum
   calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
@@ -465,8 +465,8 @@ template <typename T, unsigned THREADS = 1024>
 void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
                         const unsigned blocks, const unsigned nthreads) {
   if constexpr (THREADS > 16) {
-    // by using this "if constexpr" I do not need to add a specialized template
-    // to end the loop
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
     if (nthreads == THREADS) {
       BlockReduceKernel<T, THREADS, dataperthread>
           <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
@@ -481,19 +481,11 @@ void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
   }
 }
 
-#define NT 128
 template <typename T>
 void cubDoReduction1D(T *inputArray, T *outputArray, const unsigned int len,
-                      const unsigned /*blocks*/, const unsigned /*nthreads*/) {
-  constexpr unsigned nthreads = NT;
-
-  unsigned blocks = ceil(double(len) / (nthreads * dataperthread));
+                      const unsigned blocks, const unsigned nthreads) {
 
   cubDoReduction1D_t(inputArray, outputArray, len, blocks, nthreads);
-
-  // BlockReduceKernel<T, nthreads, dataperthread>
-  //     <<<blocks, nthreads, nthreads * sizeof(T)>>>(len, inputArray,
-  //                                                  outputArray);
 }
 
 #define X(I) 3 * I
@@ -700,7 +692,9 @@ void CudaCoordination<calculateFloat>::calculate() {
   while (N > 1) {
     size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
     // unsigned nGroups = CUDAHELPERS::idealGroups(N, runningThreads);
-    unsigned nGroups = ceil(double(N) / (NT * 4));
+    // constexpr unsigned nthreads = NT;
+    log.printf("maxNT:%i\n", maxNumThreads);
+    unsigned nGroups = ceil(double(N) / (runningThreads * dataperthread));
 
     reductionMemoryCoord.resize(nGroups);
 
