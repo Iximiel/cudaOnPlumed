@@ -2,3 +2,4 @@
 make.inc
 *.o
 *.so
+*.zip
