@@ -651,7 +651,7 @@ void CudaCoordination<calculateFloat>::calculate() {
 
   cudaDeviceSynchronize();
 
-  CUDAHELPERS::plmdDataFromGPU(cudaDerivatives, deriv);
+  CUDAHELPERS::plmdDataFromGPU(cudaDerivatives, deriv, streamDerivatives);
 
   auto N = nat;
 
@@ -673,7 +673,7 @@ void CudaCoordination<calculateFloat>::calculate() {
                      nGroups, runningThreads);
 
     if (nGroups == 1) {
-      CUDAHELPERS::plmdDataFromGPU(reductionMemoryVirial, virial);
+      CUDAHELPERS::plmdDataFromGPU(reductionMemoryVirial, virial, streamVirial);
       coordination = reductionMemoryCoord[0];
     } else {
       reductionMemoryVirial.swap(cudaVirial);

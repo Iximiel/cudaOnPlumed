@@ -26,6 +26,13 @@
 namespace CUDAHELPERS {
 
 /// @brief a interface to help in the data I/O to the GPU
+///
+/// It contains specialized constructors for using the correct size with
+/// PLMD::VectorGeneric or PLMD::TensorGeneric along with a std::vector
+/// constructor to generate the corret data structure given the size of it.
+///
+/// The functions and types that use DataInterface assume that ALL the data
+/// contained within the passed object will be used
 struct DataInterface {
   double *ptr = nullptr;
   size_t size = 0;
@@ -47,25 +54,24 @@ struct DataInterface {
       : DataInterface(vt[0], vt.size()) {}
 };
 
+/// @brief the specialized functionfor getting double precision data from the
+/// gpu to a PLMD container
 inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
                             DataInterface data) {
   cudaMemcpy(data.ptr, thrust::raw_pointer_cast(dvmem.data()),
              data.size * sizeof(double), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
 }
 
-inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
-                            DataInterface data) {
-
-  std::vector<float> tempMemory(data.size);
-  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
-             data.size * sizeof(float), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-  for (auto i = 0u; i < data.size; ++i) {
-    data.ptr[i] = tempMemory[i];
-  }
+/// @brief the specialized asyncronous function for getting double precision
+/// data from the gpu to a PLMD container
+inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
+                            DataInterface data, cudaStream_t stream) {
+  cudaMemcpyAsync(data.ptr, thrust::raw_pointer_cast(dvmem.data()),
+                  data.size * sizeof(double), cudaMemcpyDeviceToHost, stream);
 }
 
+/// @brief the specialized function for putting double precision
+/// data from a PLMD container to the gpu
 inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
                           DataInterface data) {
   dvmem.resize(data.size);
@@ -73,6 +79,39 @@ inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
              data.size * sizeof(double), cudaMemcpyHostToDevice);
 }
 
+/// @brief the specialized asyncronous function for putting double precision
+/// data from a PLMD container to the gpu
+inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
+                          DataInterface data, cudaStream_t stream) {
+  dvmem.resize(data.size);
+  cudaMemcpyAsync(thrust::raw_pointer_cast(dvmem.data()), data.ptr,
+                  data.size * sizeof(double), cudaMemcpyHostToDevice, stream);
+}
+
+/// @brief the specialized function for getting single precision data from the
+/// gpu to a PLMD container
+/// @param dvmem the cuda interface to the data on the device
+/// @param data the interface to the plumed-type of data
+/// @param -ignored-
+///
+/// FAQ:why there is only a non async version?
+/// the for loop used to convert float to double may be used concurrently with
+/// the memcpy, so is safer to not enqueue concurrently
+inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
+                            DataInterface data, cudaStream_t = 0) {
+  std::vector<float> tempMemory(data.size);
+  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
+             data.size * sizeof(float), cudaMemcpyDeviceToHost);
+  for (auto i = 0u; i < data.size; ++i) {
+    data.ptr[i] = tempMemory[i];
+  }
+}
+
+// since the for loop is BEFORE the memcpy I can safely distinguish the async
+// case from the non async one
+
+/// @brief the specialized function for putting double precision
+/// data from a PLMD container to the gpu
 inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
                           DataInterface data) {
   dvmem.resize(data.size);
@@ -84,16 +123,60 @@ inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
              data.size * sizeof(float), cudaMemcpyHostToDevice);
 }
 
+/// @brief the specialized asyncronous function for putting double precision
+/// data from a PLMD container to the gpu
+inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
+                          DataInterface data, cudaStream_t stream) {
+  dvmem.resize(data.size);
+  std::vector<float> tempMemory(data.size);
+  for (auto i = 0u; i < data.size; ++i) {
+    tempMemory[i] = data.ptr[i];
+  }
+  cudaMemcpyAsync(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
+                  data.size * sizeof(float), cudaMemcpyHostToDevice, stream);
+}
+
 // the explicit constructors of DataInterface create the need for a wrapper
+/// @brief copies data to the GPU, using thrust::device_vector as interface
+///
+/// if you are transferring data from/to a 'standard' vector, consider using
+/// thrust::host_vector<T> and the thrust syntax (`deviceV=hostV;` for moving to
+/// the device or `hostV=`deviceV;` for moving from the device)
 template <typename T, typename Y>
 inline void plmdDataToGPU(thrust::device_vector<T> &dvmem, Y &data) {
   plmdDataToGPU(dvmem, DataInterface(data));
 }
 
-// the explicit constructors of DataInterface create the need for a wrapper
+/// @brief async version of plmdDataToGPU
+///
+/// if you are transferring data from/to a 'standard' vector, consider using
+/// thrust::host_vector<T> and the thrust syntax (`deviceV=hostV;` for moving to
+/// the device or `hostV=`deviceV;` for moving from the device)
+template <typename T, typename Y>
+inline void plmdDataToGPU(thrust::device_vector<T> &dvmem, Y &data,
+                          cudaStream_t stream) {
+  plmdDataToGPU(dvmem, DataInterface(data), stream);
+}
+
+/// @brief copies data from the GPU, using thrust::device_vector as interface
+///
+/// if you are transferring data from/to a 'standard' vector, consider using
+/// thrust::host_vector<T> and the thrust syntax (`deviceV=hostV;` for moving to
+/// the device or `hostV=`deviceV;` for moving from the device)
 template <typename T, typename Y>
 inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data) {
   plmdDataFromGPU(dvmem, DataInterface(data));
+}
+
+/// @brief async version of plmdDataFromGPU
+///
+/// if you are transferring data from/to a 'standard' vector, consider using
+/// thrust::host_vector<T> and the thrust syntax (`deviceV=hostV;` for moving to
+/// the device or `hostV=`deviceV;` for moving from the device)
+template <typename T, typename Y>
+inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data,
+                            cudaStream_t stream) {
+  plmdDataFromGPU(dvmem, DataInterface(data), stream);
 }
 
 // after c++14 the template activation will be shorter to write:
