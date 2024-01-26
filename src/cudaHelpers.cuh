@@ -25,83 +25,75 @@
 #include <vector>
 namespace CUDAHELPERS {
 
-// the two dim classes are placeholders
-template <unsigned n> constexpr unsigned dim(PLMD::VectorGeneric<n>) {
-  return n;
+/// @brief a interface to help in the data I/O to the GPU
+struct DataInterface {
+  double *ptr = nullptr;
+  size_t size = 0;
+  DataInterface() = delete;
+  template <unsigned n>
+  explicit DataInterface(PLMD::VectorGeneric<n> &vg) : ptr(&vg[0]), size(n) {}
+  template <unsigned n>
+  explicit DataInterface(PLMD::VectorGeneric<n> &vg, size_t s)
+      : ptr(&vg[0]), size(s * n) {}
+
+  template <unsigned n, unsigned m>
+  explicit DataInterface(PLMD::TensorGeneric<n, m> &tns)
+      : ptr(&tns[0][0]), size(n * m) {}
+  template <unsigned n, unsigned m>
+  explicit DataInterface(PLMD::TensorGeneric<n, m> &tns, size_t s)
+      : ptr(&tns[0][0]), size(s * n * m) {}
+  template <typename T>
+  explicit DataInterface(std::vector<T> &vt)
+      : DataInterface(vt[0], vt.size()) {}
+};
+
+inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
+                            DataInterface data) {
+  cudaMemcpy(data.ptr, thrust::raw_pointer_cast(dvmem.data()),
+             data.size * sizeof(double), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
 }
 
-template <unsigned n, unsigned m>
-constexpr unsigned dim(PLMD::TensorGeneric<n, m>) {
-  return n * m;
+inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
+                            DataInterface data) {
+
+  std::vector<float> tempMemory(data.size);
+  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
+             data.size * sizeof(float), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+  for (auto i = 0u; i < data.size; ++i) {
+    data.ptr[i] = tempMemory[i];
+  }
 }
 
-template <typename T>
-inline double *cast_to_simple_pointer(std::vector<T> &data) {
-  return static_cast<double *>(&data[0][0]);
-}
-
-template <typename T>
 inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
-                          std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  dvmem.resize(usedim_);
-  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), &data[0][0],
-             usedim_ * sizeof(double), cudaMemcpyHostToDevice);
+                          DataInterface data) {
+  dvmem.resize(data.size);
+  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), data.ptr,
+             data.size * sizeof(double), cudaMemcpyHostToDevice);
 }
 
-template <typename T>
 inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
-                          std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  dvmem.resize(usedim_);
-  std::vector<float> tempMemory(3 * data.size());
-  for (auto i = 0u; i < usedim_; ++i) {
-    tempMemory[i] = cast_to_simple_pointer(data)[i];
+                          DataInterface data) {
+  dvmem.resize(data.size);
+  std::vector<float> tempMemory(data.size);
+  for (auto i = 0u; i < data.size; ++i) {
+    tempMemory[i] = data.ptr[i];
   }
   cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
-             usedim_ * sizeof(float), cudaMemcpyHostToDevice);
+             data.size * sizeof(float), cudaMemcpyHostToDevice);
 }
 
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
-                            std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  std::vector<float> tempMemory(usedim_);
-  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-  for (auto i = 0u; i < usedim_; ++i) {
-    cast_to_simple_pointer(data)[i] = tempMemory[i];
-  }
+// the explicit constructors of DataInterface create the need for a wrapper
+template <typename T, typename Y>
+inline void plmdDataToGPU(thrust::device_vector<T> &dvmem, Y &data) {
+  plmdDataToGPU(dvmem, DataInterface(data));
 }
 
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
-                            std::vector<T> &data) {
-  const auto usedim_ = dim(data[0]) * data.size();
-  cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-}
-
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem, T &data) {
-  auto usedim_ = dim(data);
-  std::vector<float> tempMemory(usedim_);
-  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(float), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
-  for (auto i = 0u; i < usedim_; ++i) {
-    *(static_cast<double *>(&data[0][0]) + i) = tempMemory[i];
-  }
-}
-
-template <typename T>
-inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem, T &data) {
-  auto usedim_ = dim(data);
-  cudaMemcpy(&data[0][0], thrust::raw_pointer_cast(dvmem.data()),
-             usedim_ * sizeof(double), cudaMemcpyDeviceToHost);
-  //  cudaMemcpyAsync
+// the explicit constructors of DataInterface create the need for a wrapper
+template <typename T, typename Y>
+inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data) {
+  plmdDataFromGPU(dvmem, DataInterface(data));
 }
 
 // after c++14 the template activation will be shorter to write:
@@ -115,7 +107,7 @@ inline T nearestUpperMultipleTo(T number, T reference) {
 }
 
 /// We'll find the ideal number of blocks using the Brent's theorem
-size_t idealGroups(size_t numberOfElements, size_t runningThreads) {
+size_t idealGroups(const size_t numberOfElements, const size_t runningThreads) {
   // nearest upper multiple to the numberof threads
   const size_t nnToGPU =
       nearestUpperMultipleTo(numberOfElements, runningThreads);
@@ -130,9 +122,9 @@ size_t idealGroups(size_t numberOfElements, size_t runningThreads) {
   return ngroups;
 }
 
-size_t threadsPerBlock(unsigned N, unsigned maxNumThreads) {
-  // this seeks the minimum number of threads to use a sigle block (and end the
-  // recursion)
+size_t threadsPerBlock(const unsigned N, const unsigned maxNumThreads) {
+  // this seeks the minimum number of threads to use a sigle block (and end
+  // the recursion)
   size_t dim = 32;
   for (dim = 32; dim < 1024; dim <<= 1) {
     if (maxNumThreads < dim) {
