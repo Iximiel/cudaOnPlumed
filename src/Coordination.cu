@@ -476,7 +476,6 @@ __global__ void reduction1DKernel(int num_valid,
 
   // Store aggregate and elapsed clocks
   if (threadIdx.x == 0) {
-    printf("CUDA: %i (%i) %f\n", blockIdx.x, blockDim.x, aggregate);
     d_out[blockIdx.x] = aggregate;
   }
 }
@@ -501,7 +500,6 @@ __global__ void reductionNDKernel(int num_valid,
 
   // Store aggregate and elapsed clocks
   if (threadIdx.x == 0) {
-    printf("CUDA: %i (%i) %f\n", blockIdx.x, blockDim.x, aggregate);
     d_out[blockIdx.x + blockIdx.y * gridDim.x] = aggregate;
   }
 }
