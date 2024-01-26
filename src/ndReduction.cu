@@ -119,7 +119,7 @@ inline T nearestUpperMultipleTo(T number, T reference) {
 }
 
 /// We'll find the ideal number of blocks using the Brent's theorem
-size_t idealGroups(size_t numberOfElements, size_t runningThreads) {
+size_t idealGroups(const size_t numberOfElements, const size_t runningThreads) {
   // nearest upper multiple to the numberof threads
   const size_t nnToGPU =
       nearestUpperMultipleTo(numberOfElements, runningThreads);
@@ -134,9 +134,9 @@ size_t idealGroups(size_t numberOfElements, size_t runningThreads) {
   return ngroups;
 }
 
-size_t threadsPerBlock(unsigned N, unsigned maxNumThreads) {
-  // this seeks the minimum number of threads to use a sigle block (and end the
-  // recursion)
+size_t threadsPerBlock(const unsigned N, const unsigned maxNumThreads) {
+  // this seeks the minimum number of threads to use a sigle block (and end
+  // the recursion)
   size_t dim = 32;
   for (dim = 32; dim < 1024; dim <<= 1) {
     if (maxNumThreads < dim) {

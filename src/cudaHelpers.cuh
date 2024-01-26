@@ -24,6 +24,86 @@
 #include <vector>
 
 namespace CUDAHELPERS {
+/// @brief a interface to help in the data I/O to the GPU
+struct DataInterface {
+  double *ptr = nullptr;
+  size_t size = 0;
+  DataInterface() = delete;
+  template <unsigned n>
+  explicit DataInterface(PLMD::VectorGeneric<n> &vg) : ptr(&vg[0]), size(n) {}
+  template <unsigned n>
+  explicit DataInterface(PLMD::VectorGeneric<n> &vg, size_t s)
+      : ptr(&vg[0]), size(s * n) {}
+
+  template <unsigned n, unsigned m>
+  explicit DataInterface(PLMD::TensorGeneric<n, m> &tns)
+      : ptr(&tns[0][0]), size(n * m) {}
+  template <unsigned n, unsigned m>
+  explicit DataInterface(PLMD::TensorGeneric<n, m> &tns, size_t s)
+      : ptr(&tns[0][0]), size(s * n * m) {}
+  template <typename T>
+  explicit DataInterface(std::vector<T> &vt)
+      : DataInterface(vt[0], vt.size()) {}
+};
+
+inline void plmdDataFromGPU(thrust::device_vector<double> &dvmem,
+                            DataInterface data) {
+  cudaMemcpy(data.ptr, thrust::raw_pointer_cast(dvmem.data()),
+             data.size * sizeof(double), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+}
+
+inline void plmdDataFromGPU(thrust::device_vector<float> &dvmem,
+                            DataInterface data) {
+
+  std::vector<float> tempMemory(data.size);
+  cudaMemcpy(tempMemory.data(), thrust::raw_pointer_cast(dvmem.data()),
+             data.size * sizeof(float), cudaMemcpyDeviceToHost);
+  //  cudaMemcpyAsync
+  for (auto i = 0u; i < data.size; ++i) {
+    data.ptr[i] = tempMemory[i];
+  }
+}
+
+inline void plmdDataToGPU(thrust::device_vector<double> &dvmem,
+                          DataInterface data) {
+  dvmem.resize(data.size);
+  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), data.ptr,
+             data.size * sizeof(double), cudaMemcpyHostToDevice);
+}
+
+inline void plmdDataToGPU(thrust::device_vector<float> &dvmem,
+                          DataInterface data) {
+  dvmem.resize(data.size);
+  std::vector<float> tempMemory(data.size);
+  for (auto i = 0u; i < data.size; ++i) {
+    tempMemory[i] = data.ptr[i];
+  }
+  cudaMemcpy(thrust::raw_pointer_cast(dvmem.data()), tempMemory.data(),
+             data.size * sizeof(float), cudaMemcpyHostToDevice);
+}
+
+// the explicit constructors of DataInterface create the need for a wrapper
+template <typename T, typename Y>
+inline void plmdDataToGPU(thrust::device_vector<T> &dvmem, Y &data) {
+  plmdDataToGPU(dvmem, DataInterface(data));
+}
+
+// the explicit constructors of DataInterface create the need for a wrapper
+template <typename T, typename Y>
+inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data) {
+  plmdDataFromGPU(dvmem, DataInterface(data));
+}
+
+// after c++14 the template activation will be shorter to write:
+// template<typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
+
+/// finds the nearest upper multiple of the given reference
+template <typename T, typename std::enable_if<std::is_integral<T>::value,
+                                              bool>::type = true>
+inline T nearestUpperMultipleTo(T number, T reference) {
+  return ((number - 1) | (reference - 1)) + 1;
+}
 
 template <class T> __device__ constexpr const T &mymin(const T &a, const T &b) {
   return (b < a) ? b : a;
@@ -35,135 +115,6 @@ template <typename T> __device__ T *shared_memory_proxy() {
   extern __shared__ unsigned char memory[];
   return reinterpret_cast<T *>(memory);
 }
-
-// onlymoveable helper
-template <typename T> class memoryHolder {
-  T *pointer_{nullptr};
-  // the dimension in memory
-  unsigned dim_{0};
-  // the used part of the array
-  unsigned usedim_{0};
-
-public:
-  memoryHolder() {}
-  memoryHolder(memoryHolder &other) = delete;
-  memoryHolder(memoryHolder &&other)
-      : pointer_(other.pointer_), dim_(other.dim_), usedim_(other.usedim_) {
-    other.pointer_ = nullptr;
-  }
-  memoryHolder(const unsigned newDim) : dim_(newDim), usedim_(newDim) {
-    cudaMalloc(&pointer_, dim_ * sizeof(T));
-  }
-  memoryHolder &operator=(memoryHolder &&other) {
-    pointer_ = other.pointer_;
-    dim_ = other.dim_;
-    usedim_ = other.usedim_;
-    other.pointer_ = nullptr;
-    other.dim_ = 0;
-    other.usedim_ = 0;
-    return *this;
-  }
-
-  ~memoryHolder() { cudaFree(pointer_); }
-  T *pointer() { return pointer_; }
-  unsigned size() const { return usedim_; }
-  unsigned reserved() const { return dim_; }
-  void /*CUresult*/ resize(const unsigned newDim, bool keepData = false) {
-
-    if (newDim > dim_) {
-      T *new_ptr = nullptr;
-      cudaMalloc(&new_ptr, newDim * sizeof(T));
-      if (keepData && pointer_) {
-        // copy the old data into the new pointer
-        cudaMemcpy(new_ptr, pointer_, usedim_ * sizeof(T),
-                   cudaMemcpyDeviceToDevice);
-      }
-      cudaFree(pointer_);
-      pointer_ = new_ptr;
-      dim_ = newDim;
-    }
-    usedim_ = newDim;
-  }
-  void /*CUresult*/ reserve(const unsigned newDim, bool keepData = false) {
-    if (newDim > dim_) {
-      T *new_ptr = nullptr;
-      cudaMalloc(&new_ptr, newDim * sizeof(T));
-      if (keepData && pointer_) {
-        // copy the old data into the new pointer
-        cudaMemcpy(new_ptr, pointer_, usedim_ * sizeof(T));
-      }
-      cudaFree(pointer_);
-      pointer_ = new_ptr;
-      dim_ = newDim;
-    }
-  }
-
-  void /*CUresult*/ copyToCuda(T *cpupointer) {
-    cudaMemcpy(pointer_, cpupointer, usedim_ * sizeof(T),
-               cudaMemcpyHostToDevice);
-  }
-
-  void /*CUresult*/ copyToCuda(T *cpupointer, cudaStream_t stream) {
-    cudaMemcpyAsync(pointer_, cpupointer, usedim_ * sizeof(T),
-                    cudaMemcpyHostToDevice, stream);
-  }
-
-  void /*CUresult*/ copyFromCuda(T *cpupointer) {
-    cudaMemcpy(cpupointer, pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-  }
-
-  void /*CUresult*/ copyFromCuda(T *cpupointer, cudaStream_t stream) {
-    cudaMemcpyAsync(cpupointer, pointer_, usedim_ * sizeof(T),
-                    cudaMemcpyDeviceToHost, stream);
-  }
-
-  //*conversions*/
-  // using vector to avoid memory leaks
-  template <typename Y> void /*CUresult*/ copyToCuda(Y *cpupointer) {
-    std::vector<T> tempMemory(usedim_);
-    for (auto i = 0u; i < usedim_; ++i)
-      tempMemory[i] = cpupointer[i];
-
-    cudaMemcpy(pointer_, tempMemory.data(), usedim_ * sizeof(T),
-               cudaMemcpyHostToDevice);
-  }
-
-  template <typename Y>
-  void /*CUresult*/ copyToCuda(Y *cpupointer, cudaStream_t stream) {
-    std::vector<T> tempMemory(usedim_);
-    for (auto i = 0u; i < usedim_; ++i)
-      tempMemory[i] = cpupointer[i];
-
-    cudaMemcpyAsync(pointer_, tempMemory.data(), usedim_ * sizeof(T),
-                    cudaMemcpyHostToDevice, stream);
-  }
-
-  template <typename Y> void /*CUresult*/ copyFromCuda(Y *cpupointer) {
-    std::vector<T> tempMemory(usedim_);
-    cudaMemcpy(tempMemory.data(), pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-    for (auto i = 0u; i < usedim_; ++i)
-      cpupointer[i] = tempMemory[i];
-  }
-
-  template <typename Y>
-  void /*CUresult*/ copyFromCuda(Y *cpupointer, cudaStream_t) {
-    std::vector<T> tempMemory(usedim_);
-    cudaMemcpy(tempMemory.data(), pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-    // not async because there is a conversion on the cpu pointer
-    for (auto i = 0u; i < usedim_; ++i)
-      cpupointer[i] = tempMemory[i];
-  }
-  /**/
-
-  void swap(memoryHolder &other) {
-    std::swap(this->pointer_, other.pointer_);
-    std::swap(this->dim_, other.dim_);
-    std::swap(this->usedim_, other.usedim_);
-  }
-};
 
 /// @brief This is the "body" of th ereduction algorithm: you should prepare the
 /// shared memory and the plug it in this, due to the templated numthreads most
