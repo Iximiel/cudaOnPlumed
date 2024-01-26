@@ -203,7 +203,7 @@ size_t idealGroups(const size_t numberOfElements, const size_t runningThreads) {
 }
 
 size_t threadsPerBlock(const unsigned N, const unsigned maxNumThreads) {
-  // this seeks the minimum number of threads to use a sigle block (and end
+  // this seeks the minimum number of threads to use a single block (and ends
   // the recursion)
   size_t dim = 32;
   for (dim = 32; dim < 1024; dim <<= 1) {
@@ -216,6 +216,109 @@ size_t threadsPerBlock(const unsigned N, const unsigned maxNumThreads) {
     }
   }
   return dim;
+}
+
+/**********************************REDUCTIONS**********************************/
+template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void
+reduction1DKernel(int num_valid,        // number if elements to be reduced
+                  calculateFloat *d_in, // Tile of input
+                  calculateFloat *d_out // Tile aggregate
+) {
+  // Specialize BlockReduce type for our thread block
+  using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+  const int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  // Per-thread tile data
+  calculateFloat data[ITEMS_PER_THREAD];
+  cub::LoadDirectBlocked(data_id, d_in, data, num_valid, calculateFloat(0.0));
+  // Compute sum
+  calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
+  if (threadIdx.x == 0) {
+    d_out[blockIdx.x] = aggregate;
+  }
+}
+
+// the order of the template arguments is not standard: in this way T is deduced
+// and the user can simply specify DATAPERTHREAD
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
+                        const unsigned blocks, const unsigned nthreads) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reduction1DKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
+                                                     outputArray);
+    } else {
+      cubDoReduction1D_t<DATAPERTHREAD, T, THREADS / 2>(inputArray, outputArray,
+                                                        len, blocks, nthreads);
+    }
+  } else {
+    plumed_merror(
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+template <unsigned DATAPERTHREAD, typename T>
+void cubDoReduction1D(T *inputArray, T *outputArray, const size_t len,
+                      const unsigned blocks, const size_t nthreads) {
+
+  cubDoReduction1D_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
+                                    nthreads);
+}
+
+template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void
+reductionNDKernel(int num_valid,        // number if elements to be reduced
+                  calculateFloat *d_in, // Tile of input
+                  calculateFloat *d_out // Tile aggregate
+) {
+  // Specialize BlockReduce type for our thread block
+  using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+  const int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  calculateFloat data[ITEMS_PER_THREAD];
+  cub::LoadDirectBlocked(data_id, d_in + blockIdx.y * num_valid, data,
+                         num_valid, calculateFloat(0.0));
+  // Compute sum
+  calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
+  if (threadIdx.x == 0) {
+    d_out[blockIdx.x + blockIdx.y * gridDim.x] = aggregate;
+  }
+}
+
+// the order of the template arguments is not standard: in this way T is deduced
+// and the user can simply specify DATAPERTHREAD
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
+                        const dim3 blocks, const unsigned nthreads) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reductionNDKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
+                                                     outputArray);
+    } else {
+      cubDoReductionND_t<DATAPERTHREAD, T, THREADS / 2>(inputArray, outputArray,
+                                                        len, blocks, nthreads);
+    }
+  } else {
+    plumed_merror(
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+template <unsigned DATAPERTHREAD, typename T>
+void cubDoReductionND(T *inputArray, T *outputArray, const unsigned int len,
+                      const dim3 blocks, const unsigned nthreads) {
+
+  cubDoReductionND_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
+                                    nthreads);
 }
 
 } // namespace CUDAHELPERS
