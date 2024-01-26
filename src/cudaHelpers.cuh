@@ -262,12 +262,42 @@ void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
   }
 }
 
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
+                        const unsigned blocks, const unsigned nthreads,
+                        cudaStream_t stream) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reduction1DKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof(T), stream>>>(len, inputArray,
+                                                             outputArray);
+    } else {
+      cubDoReduction1D_t<DATAPERTHREAD, T, THREADS / 2>(
+          inputArray, outputArray, len, blocks, nthreads, stream);
+    }
+  } else {
+    plumed_merror(
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
 template <unsigned DATAPERTHREAD, typename T>
 void cubDoReduction1D(T *inputArray, T *outputArray, const size_t len,
                       const unsigned blocks, const size_t nthreads) {
 
   cubDoReduction1D_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
                                     nthreads);
+}
+
+template <unsigned DATAPERTHREAD, typename T>
+void cubDoReduction1D(T *inputArray, T *outputArray, const size_t len,
+                      const unsigned blocks, const size_t nthreads,
+                      cudaStream_t stream) {
+
+  cubDoReduction1D_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
+                                    nthreads, stream);
 }
 
 template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
@@ -313,6 +343,27 @@ void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
   }
 }
 
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
+                        const dim3 blocks, const unsigned nthreads,
+                        cudaStream_t stream) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reductionNDKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof(T), stream>>>(len, inputArray,
+                                                             outputArray);
+    } else {
+      cubDoReductionND_t<DATAPERTHREAD, T, THREADS / 2>(
+          inputArray, outputArray, len, blocks, nthreads, stream);
+    }
+  } else {
+    plumed_merror(
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
 template <unsigned DATAPERTHREAD, typename T>
 void cubDoReductionND(T *inputArray, T *outputArray, const unsigned int len,
                       const dim3 blocks, const unsigned nthreads) {
@@ -321,5 +372,13 @@ void cubDoReductionND(T *inputArray, T *outputArray, const unsigned int len,
                                     nthreads);
 }
 
+template <unsigned DATAPERTHREAD, typename T>
+void cubDoReductionND(T *inputArray, T *outputArray, const unsigned int len,
+                      const dim3 blocks, const unsigned nthreads,
+                      cudaStream_t stream) {
+
+  cubDoReductionND_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
+                                    nthreads, stream);
+}
 } // namespace CUDAHELPERS
 #endif //__PLUMED_cuda_helpers_cuh

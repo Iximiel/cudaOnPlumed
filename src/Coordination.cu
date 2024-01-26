@@ -559,15 +559,16 @@ void CudaCoordination<calculateFloat>::calculate() {
     CUDAHELPERS::cubDoReductionND<dataperthread>(
         thrust::raw_pointer_cast(cudaVirial.data()),
         thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
-        ngroupsVirial, runningThreads);
+        ngroupsVirial, runningThreads, streamVirial);
 
     CUDAHELPERS::cubDoReduction1D<dataperthread>(
         thrust::raw_pointer_cast(cudaCoordination.data()),
         thrust::raw_pointer_cast(reductionMemoryCoord.data()), N, nGroups,
-        runningThreads);
+        runningThreads, streamCoordination);
 
     if (nGroups == 1) {
       CUDAHELPERS::plmdDataFromGPU(reductionMemoryVirial, virial, streamVirial);
+      // TODO:find a way to stream this
       coordination = reductionMemoryCoord[0];
     } else {
       reductionMemoryVirial.swap(cudaVirial);
