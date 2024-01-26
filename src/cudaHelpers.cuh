@@ -179,12 +179,9 @@ inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data,
   plmdDataFromGPU(dvmem, DataInterface(data), stream);
 }
 
-// after c++14 the template activation will be shorter to write:
-// template<typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-
 /// finds the nearest upper multiple of the given reference
-template <typename T, typename std::enable_if<std::is_integral<T>::value,
-                                              bool>::type = true>
+template <typename T,
+          typename std::enable_if_t<std::is_integral_v<T>, bool> = true>
 inline T nearestUpperMultipleTo(T number, T reference) {
   return ((number - 1) | (reference - 1)) + 1;
 }
