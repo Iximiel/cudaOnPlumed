@@ -722,8 +722,7 @@ void CudaCoordination<calculateFloat>::calculate() {
         thrust::raw_pointer_cast(cudaVirial.data()));
   }
 
-  /**************************accumulating the
-   * results**************************/
+  /**************************accumulating the results**************************/
 
   cudaDeviceSynchronize();
 

@@ -21,7 +21,12 @@
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
+#include <thrust/device_vector.h>
+
 #include <vector>
+
+#include "plumed/tools/Tensor.h"
+#include "plumed/tools/Vector.h"
 
 namespace CUDAHELPERS {
 /// @brief a interface to help in the data I/O to the GPU
@@ -95,16 +100,6 @@ inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data) {
   plmdDataFromGPU(dvmem, DataInterface(data));
 }
 
-// after c++14 the template activation will be shorter to write:
-// template<typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-
-/// finds the nearest upper multiple of the given reference
-template <typename T, typename std::enable_if<std::is_integral<T>::value,
-                                              bool>::type = true>
-inline T nearestUpperMultipleTo(T number, T reference) {
-  return ((number - 1) | (reference - 1)) + 1;
-}
-
 template <class T> __device__ constexpr const T &mymin(const T &a, const T &b) {
   return (b < a) ? b : a;
 }
@@ -124,22 +119,22 @@ __device__ void reductor(volatile T *sdata, T *outputArray,
                          const unsigned int where) {
   // this is an unrolled loop
   const unsigned int tid = threadIdx.x;
-  if (numThreads >= 1024) { // compile time
+  if constexpr (numThreads >= 1024) { // compile time
     if (tid < 512)
       sdata[tid] += sdata[tid + 512];
     __syncthreads();
   }
-  if (numThreads >= 512) { // compile time
+  if constexpr (numThreads >= 512) { // compile time
     if (tid < 256)
       sdata[tid] += sdata[tid + 256];
     __syncthreads();
   }
-  if (numThreads >= 256) { // compile time
+  if constexpr (numThreads >= 256) { // compile time
     if (tid < 128)
       sdata[tid] += sdata[tid + 128];
     __syncthreads();
   }
-  if (numThreads >= 128) { // compile time
+  if constexpr (numThreads >= 128) { // compile time
     if (tid < 64)
       sdata[tid] += sdata[tid + 64];
     __syncthreads();
@@ -148,22 +143,22 @@ __device__ void reductor(volatile T *sdata, T *outputArray,
   // so no  need to use __syncthreads() for the last iterations;
   if (tid < mymin(32u, numThreads / 2)) {
     // warpReduce<numThreads>(sdata, tid);
-    if (numThreads >= 64) { // compile time
+    if constexpr (numThreads >= 64) { // compile time
       sdata[tid] += sdata[tid + 32];
     }
-    if (numThreads >= 32) { // compile time
+    if constexpr (numThreads >= 32) { // compile time
       sdata[tid] += sdata[tid + 16];
     }
-    if (numThreads >= 16) { // compile time
+    if constexpr (numThreads >= 16) { // compile time
       sdata[tid] += sdata[tid + 8];
     }
-    if (numThreads >= 8) { // compile time
+    if constexpr (numThreads >= 8) { // compile time
       sdata[tid] += sdata[tid + 4];
     }
-    if (numThreads >= 4) { // compile time
+    if constexpr (numThreads >= 4) { // compile time
       sdata[tid] += sdata[tid + 2];
     }
-    if (numThreads >= 2) { // compile time
+    if constexpr (numThreads >= 2) { // compile time
       sdata[tid] += sdata[tid + 1];
     }
   }
