@@ -467,10 +467,10 @@ __global__ void reduction1DKernel(int num_valid,
   using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
   // Shared memory
   __shared__ typename BlockReduceT::TempStorage temp_storage;
-  int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  const int data_id = threadIdx.x + blockIdx.x * blockDim.x;
   // Per-thread tile data
-  calculateFloat data[ITEMS_PER_THREAD] = {0.0, 0.0, 0.0, 0.0};
-  cub::LoadDirectBlocked(data_id, d_in, data, num_valid);
+  calculateFloat data[ITEMS_PER_THREAD];
+  cub::LoadDirectBlocked(data_id, d_in, data, num_valid, calculateFloat(0.0));
   // Compute sum
   calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
 
@@ -490,11 +490,12 @@ __global__ void reductionNDKernel(int num_valid,
   using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
   // Shared memory
   __shared__ typename BlockReduceT::TempStorage temp_storage;
-  int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  const int data_id = threadIdx.x + blockIdx.x * blockDim.x;
   // Per-thread tile data
-  calculateFloat data[ITEMS_PER_THREAD] = {0.0, 0.0, 0.0, 0.0};
+  // Per-thread tile data
+  calculateFloat data[ITEMS_PER_THREAD];
   cub::LoadDirectBlocked(data_id, d_in + blockIdx.y * num_valid, data,
-                         num_valid);
+                         num_valid, calculateFloat(0.0));
   // Compute sum
   calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
 
