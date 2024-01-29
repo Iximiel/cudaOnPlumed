@@ -1,6 +1,9 @@
 # Implementation
 
-Small disclaimer: the code I am presenting here is a simplified version of the actual code that is avaiable as example implementation in this [repository](https://github.com/Iximiel/cudaOnPlumed). The actual implementation has type templates and supports pbcs. These particulares are not useful in understanding the basis for a plumed implementation ofa  simple CV.
+Small disclaimer: the code I am presenting here is a simplified version of the actual code that is avaiable as example implementation in this [repository](https://github.com/Iximiel/cudaOnPlumed). The actual implementation has type templates and supports pbcs. These particulares are not useful in understanding the basis for a plumed implementation of a  simple CV.
+
+It this is not the first tiime you read this I have updated the code on the repository to use the NVIDIA's [CCCL](https://github.com/NVIDIA/cccl) API. You may find some changes in the code.
+The code changes are not radical an I may have missed something while updating the page, always refer toe the repository for an up-to-date code.
 
 ## The switching function
 In this case the coordination is calculated with $\frac{1}{2} \sum_{i\lt{}nat}^{i} \sum_{j\lt{}nat,j\neq i}^{j} f(d_{ij})$, where $d_{ij}$ is the distances between atom $i$ and $j$, and $f(x)$ is a function that usually has the form
@@ -108,8 +111,11 @@ __global__ void getSelfCoord(
 
 You can view this kernel as the inner body of the nested for loop that can be used to write the most naive serial implementation of the coordination (the outer loop would run on the `i` variable).
 
-The use of global memory should be limited in a kernel, because accessing global memory is far slower that working on shared memory (that it is not used in this case, shared memory is shared between kernels within a group) or the local memory declared within each kernel.
-Here within each kernel I have accumulated the values in local variables and not on the global memory and then update the global memory only at the end of the calculation. Using `mycoord += coord;` instead of `ncoordOut[i] += coord;` within the loop will speed up the calculations. only at the end of kernel.
+The use of global memory should be limited in a kernel, because accessing global memory is far slower that working on shared memory (that it is not used in this case, shared memory is shared between kernels within a group) or the registers, aka the variables, (the  "local memory") declared within each kernel.
+
+Here within each kernel I have accumulated the values in local variables and not on the global memory and then update the global memory only at the end of the calculation. Using `mycoord += coord;` instead of `ncoordOut[i] += coord;` within the loop will speed up the calculations.
+
+In the actual implementation the `float myVirial[9];` and `float d[3];` are presented as a collection of 9 and 3 single declared values to use the registers of the kernels, here are declared as array for clarity.
 
 ### The switching function
 
@@ -181,7 +187,8 @@ It is possible to enforce the behaviour with  `__forceinline__` or `__inline_hin
 
 ## Interfacing to cuda: invoking the kernel and the reductions
 
-Go to the [helpers](Helpers.md) page for details on the reduction and on how the memory handlers works.
+This section is changed heavily since the previous version
+Go to the [helpers](Helpers.md) page for details on the reduction and on how the CCCL interface.
 
 ### Calling the kernel in the calculate() method
 
@@ -189,10 +196,11 @@ As in any other `PLMD::Action` we have a `calculate()` method.
 
 We start with getting the atoms positions, and we immediately load them into the GPU:
 ```c++
+//cudaPositions is a thrust::device_vector<float>
 auto positions = getPositions();  
-cudaPositions.copyToCuda(&positions[0][0], streamDerivatives);
+CUDAHELPERS::plmdDataToGPU(cudaPositions, positions, streamDerivatives);
 ```
-during the construction of the action the number of atoms has already been initialized, so no need to resize `cudaPositions` or `cudaDerivatives`. Moreover we are using the async version of copyTo, so we can set up other things on the CPU while the data is copyied.
+during the construction of the action the number of atoms has already been initialized, so no need to resize `cudaPositions` (for safety reason `plmdDataToGPU` will do it for you) or `cudaDerivatives`. Moreover we are using the async version of `plmdDataToGPU`, so we can set up other things on the CPU while the data is copyied.
 
 Then we fetch the number of atoms and we prepare the memory and the number of groups for calling the kernel:
 ```c++
@@ -219,30 +227,36 @@ the kernel is called with the `<<<>>>` syntax, between the three brackets we spe
 ```c++
 getCoord<<<ngroups, nthreads, 0, streamDerivatives>>>(
     nat, switchingParameters,
-    cudaPositions.pointer(),
-    cudaTrueIndexes.pointer(),
-    cudaCoordination.pointer(),
-    cudaDerivatives.pointer(), 
-    cudaVirial.pointer());
-
-cudaDeviceSynchronize();
+    thrust::raw_pointer_cast(cudaPositions.data()),
+    thrust::raw_pointer_cast(cudaTrueIndexes.data()),
+    thrust::raw_pointer_cast(cudaCoordination.data()),
+    thrust::raw_pointer_cast(cudaDerivatives.data()),
+    thrust::raw_pointer_cast(cudaVirial.data()));
 ```
+###
 
-We also call the `cudaDeviceSynchronize();` to wait for the [kernel](#the-coord-kernel) to finish: we want to execute the reduction on complete data!!!
+Befre meoving the data again on the CPU's RAM we want to be sure that the [kernel](#the-coord-kernel) has finished its calculations bu
+calliing `cudaDeviceSynchronize();`.
 
+Then we enqueue an async opy of the derivatives.
+
+```c++
+cudaDeviceSynchronize();
+CUDAHELPERS::plmdDataFromGPU(cudaDerivatives, deriv, streamDerivatives);
+```
 ### Calling the reductions in the calculate() method
 
-After the [kernel](#the-coord-kernel) finishes we have the virial and the coordination accumulated for each atom: we proceed to accumulate the results for the whole system with the utilities in ndReduction.cu.
-The reduction algorithm is recursively called by the following loop in which we enqueue the .
-Before we enqueue the copy  of the derivatives from the GPU to the CPU, because the GPU can process two data stream and a kernel together if they are in different streams.
+After the [kernel](#the-coord-kernel) finishes we have the virial and the coordination accumulated for each atom: we proceed to accumulate the results for the whole system with the utilities in cudaHelpers.cuh, that are written using the building blocs of CCCL/cub.
+The reduction algorithm is recursively called by the following loop.
+
 ```c++
-cudaDerivatives.copyFromCuda(&deriv[0][0], streamDerivatives);
 auto N = nat;
 //at each consequent iteration the kernels will return nGroups elements
 //so we repeat the loop until we have sum-reduced the data to only one (per component in the case of the virial)
 while (N > 1) {
   size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
-  unsigned nGroups = CUDAHELPERS::idealGroups(N, runningThreads);
+  //dataperthread is fixed and is the number of element each thread will work on
+  unsigned nGroups = ceil(double(N) / (runningThreads * dataperthread));
 
   reductionMemoryCoord.resize(nGroups);
   reductionMemoryVirial.resize(9 * nGroups);
@@ -253,19 +267,20 @@ while (N > 1) {
   // doReductionND will need a 2D group size,
   //  - the first dimension is the number of group to use for each dimension,
   //  - the second dimension is the number of dimensions of the array
-  CUDAHELPERS::doReductionND(cudaVirial.pointer(),
-      reductionMemoryVirial.pointer(),
-      N,ngroupsVirial, runningThreads, streamVirial);
+  CUDAHELPERS::cubDoReductionND<dataperthread>(
+        thrust::raw_pointer_cast(cudaVirial.data()),
+        thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
+        ngroupsVirial, runningThreads, streamVirial);
 
-  CUDAHELPERS::doReduction1D(
-      cudaCoordination.pointer(),
-      reductionMemoryCoord.pointer(),
-      N, nGroups, runningThreads, streamCoordination);
+  CUDAHELPERS::cubDoReduction1D<dataperthread>(
+        thrust::raw_pointer_cast(cudaCoordination.data()),
+        thrust::raw_pointer_cast(reductionMemoryCoord.data()), N, nGroups,
+        runningThreads, streamCoordination);
 
   if (nGroups == 1) {
-    reductionMemoryVirial.copyFromCuda(&virial[0][0], streamVirial);
-    // reduceSOut->copyFromCuda(&coordination,streamCoordination);
-    reductionMemoryCoord.copyFromCuda(&coordination, streamCoordination);
+    CUDAHELPERS::plmdDataFromGPU(reductionMemoryVirial, virial, streamVirial);
+    // here we are using the simplified thrust syntax
+    coordination = reductionMemoryCoord[0];
   } else {
     // std::swap(reduceScalarIn,reduceSOut);
     reductionMemoryCoord.swap(cudaCoordination);
@@ -276,10 +291,10 @@ while (N > 1) {
 }
 ```
 
-The swaps of the memory are there because the output of a iteration reduction became the input of the next iteration.
+The swaps of the memory are there because the output of a iteration reduction became the input of the next iteration and we want to use the already allocated data as the next result recipient.
 The last iteration (where `nGroups == 1`) enqueue the async version of the GPU to CPU copies.
 
-The ND-reduction expects the data to be organized as a series of concatenated arrays:
+The ND-reduction expects the data to be organized as a series of concatenated arrays (this is also know as a block arrangement, at least in the cub manual):
 `[x0, x1, x2, ..., xn-2, xn-1, y0, y1, y2, ..., yn-2, yn-1, z0,... ]` and so on.
 
 ### Finalizing the results

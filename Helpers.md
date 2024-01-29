@@ -1,40 +1,145 @@
 # The CUDAHELPERS library
 
-The helper library contains an implementation of the reduction algorithm and its interface (precompiled for float and double), along with a templated RAII helper for managing memory on the GPU.
+This helper library contains an implementation of the reduction algorithm using the [cub](https://nvidia.github.io/cccl/cub/) building blocks and and interface between the [thrust](https://nvidia.github.io/cccl/thrust/) vectors  and the PLMD::Vector and PLMD::Tensor classes.
 
-The helper library is composed by a main header (ndReduction.h) with its companion code in ndReduction.cu and a hidden header cudaHelpers.cuh.
+The helper library is a header-only library `cudaHelpers.cuh`.
 
 See the [coordination implementation](Implementation.md) for an example on how use the code described here.
 
 ## The reduction interface
 
-The reduction is implemented following [this guide](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf). ndReduction.h exposes the interface to the reduction algorithm
+The original version used a plain CUDA C++ reduction and was  implemented following [this guide](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf).
 
-- `void doReduction1D (float *inputArray,
- float *outputArray,
- const unsigned int len,
- const unsigned blocks,
- const unsigned nthreads,
- cudaStream_t stream=0);`{:.c++} calls the appropriate reduction kernel for a 1D array
+I recommend to try to implement the reduction algorithm by hand before using cub, to have a better picture of the concept and of the algorithm.
 
-- `void doReductionND (float *inputArray,
- float *outputArray,
- const unsigned int len,
- const dim3 blocks,
- const unsigned nthreads,
- cudaStream_t stream=0);`{:.c++} calls the appropriate reduction kernel for a N-dimensional array
 
-## The memory helper
-cudaHelpers.cuh is an very simple template-only library made ad hoc for this project. It contains a simple interface for working with the memory in cuda, and the `__device__` function for completing a binary reduction.
+The call to the reduction kernels is mediated by templated interface functions.
 
-The memory interface is a templated class: `template <typename T> class memoryHolder;` will ease the memory management with an RAII approach (so by hiding the need to call `cudaMalloc` and `cudaFree`).
-It `memoryHolder` is set up as a move-only object in a `std::unique_ptr` style. It initializes the wanted quantity of memory on construction. And has the following methods:
- - `T* pointer()`{:.c++} returns the GPU address of the allocated memory in the GPU
- - `size_t size()`{:.c++} returns the size of the memory allocated on the gpu that is accessible with the `copyTo` and `copyFrom` methods (in numbers of `T`, like in the STL)
- - `size_t reserved()`{:.c++} returns the size of the memory allocated on the gpu (in numbers of `T`, like in the STL), it may be bigger than the number returned by size
- - `void resize(size_t)`{:.c++} changes the size of the memory accessible, if the asked size is greater than the reserved memory, the memory will be reallocated, otherwise will only be changed the avaiable memory to the `copyTo` and `copyFrom` methods. A parameter regulates if the new array should contain the old data during a reallocation
- - `void reserve(size_t)`{:.c++} reallocate the memory on the GPU (after calling this method `size==reserved`). A parameter regulates if the new array should contain the old data during a reallocation
- - `void copyToCuda(Y *)`{:.c++} copies a number of `T` elements equal to `size` from the CPU to the GPU memory (if called with a type different from `T` a conversion will be made on the CPU before copying the memory)
- - `void copyFromCuda(Y *)`{:.c++} copies a number of `T` elements equal to `size` from the GPU to the CPU memory (if called with a type different from `T` a conversion will be made on the CPU after copying the memory)
+```c++
+template <unsigned DATAPERTHREAD, typename T>
+void cubDoReduction1D(
+  T *inputArray,         //the GPU-pointer to the input data
+  T *outputArray,        //the GPU-pointer to the output data
+  const size_t len,      //the lenght of the input array
+  const unsigned blocks, //the number of block to use
+  const size_t nthreads, //the number of thread to use
+  cudaStream_t stream    //the stream to use for concurrent operations
+  )
+```
+```c++
+template <unsigned DATAPERTHREAD, typename T>
+void cubDoReductionND(
+  T *inputArray,         //the GPU-pointer to the input data
+  T *outputArray,        //the GPU-pointer to the output data
+  const size_t len,      //the lenght of the input array
+  const dim3 blocks,     //the number of block to use (in format blocks, nd)
+  const size_t nthreads, //the number of thread to use
+  cudaStream_t stream    //the stream to use for concurrent operations
+  )
+```
 
- both `copyTo` and `copyFrom` have an overloaded async version that is invoked by calling the function with specifying a stream as second argument  (`void copyToCuda(Y *,cudaStream_t )`{:.c++}, `void copyFromCuda(Y *, cudaStream_t )`{:.c++}).
+These interfaces ask for a `T*` instead of a `thrust::device_vector<T>` for flexibility, remeber to pass a device pointer, not a CPU pointer.
+
+The `dim3` type is a triplette of integers defined in the cuda headers that will be used to spawn a 2D (in this case) grid of kernels. The first dimension is the number of expected blocks that should be `ceil(len / (nthreads * DATAPERTHREAD));`, and the second dimension the number of data dimension.
+
+These function should be called in a driver that loops on them, for example:
+```C++
+template<int datperthread,typename T>
+T drive(const int threads, thrust::host_vector<T> &data){
+  const int len = data.size();
+  //this loads the data on the GPU, I'm using an host_vector to simplify the syntax
+  thrust::device_vector<T> gpudata=data;
+  thrust::device_vector<T> returnData;
+  auto N= len;
+  while (N>1){
+    // scale the number of threads depending on N, each thread will process
+    // datperthread numbers before doing the collective reduction
+    size_t runningThreads = threadsPerBlock(ceil(double(N) / dataperthread));
+    // decide the number of groups to be used
+    unsigned groups = ceil(double(N) / (runningThreads * dataperthread));
+    returnData.resize(groups);
+    cubDoReduction1D<dataperthread>(
+        thrust::raw_pointer_cast(gpudata.data()),
+        thrust::raw_pointer_cast(returnData.data()), N, groups,
+        runningThreads);
+    if (nGroups > 1) {
+      //swap the data to use the output as input of the next iteration, and using th
+      gpudata.swap(returnData);
+    }
+  }
+  //the data can be transferred this easy (with thrust)!
+  T toret = returnData[0];
+  return toret;
+}
+
+```
+this driver 'throws away' the input data (on the gpu) at eac iteration, using the containing array as a container for the output of the next iteration, and using the output.
+
+
+These interfaces can be called without the stream and the kernels will be serially executed.
+
+
+## The reduction kernel
+
+Here I am showing only the more ND kernel, the 1D one is exaclty this one, but with the `blockIdx.y * something` parts removed.
+
+The reduction kernels are assembled with cub building bloks
+
+```c++
+template <typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void
+reductionNDKernel(int num_valid,        // number if elements to be reduced
+                  calculateFloat *d_in, // Tile of input
+                  calculateFloat *d_out // Tile aggregate
+) {
+  // Specialize BlockReduce type for our thread block
+  using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
+  // Shared memory across all the threads of THIS block
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+  const int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  //the explicit ITEMS_PER_THREAD here is used for the template parameter deduction of cub::LoadDirectBlocked
+  T data[ITEMS_PER_THREAD];
+  //this function loads the num_valid elements of data into the data array
+  //is more or less equivalent to an unrolled version of
+  // for(auto i=0;i<ITEMS_PER_THREAD;++i){
+  //   if (data_id+i < num_valid){
+  //     data[i] = d_in[ blockIdx.y * num_valid+ data_id+i];
+  //   } else {
+  //     data[i]= T(0)
+  //   }
+  // }
+  cub::LoadDirectBlocked(data_id, d_in + blockIdx.y * num_valid, data,
+                         num_valid, T(0.0));
+  //Each thread sums its data elements into temp_storage[threadIdx.x]
+  //then proceed with the reduction on the shared memory (see the link before)
+  calculateFloat aggregate = BlockReduceT(temp_storage).Sum(data);
+  if (threadIdx.x == 0) {
+    d_out[blockIdx.x + blockIdx.y * gridDim.x] = aggregate;
+  }
+}
+```
+
+The last two arguments of `cub::LoadDirectBlocked` make sure that we are calling the overload that assigns 0 to data when we are trying to load out-of-bound elements. 
+We need to use this becasue we usually do not have powers of 2 data elements to be reduced.
+
+## The PLMD-thrust interface
+
+`cudaHelpers.cuh` contains an interface between `thrust`, `cuda` and the Tensor and Vector class from PLMD.
+
+Both the DataFrom and the DataTo have an async and a non async version, depending on the presence of the stream variable on call.
+
+```c++
+template <typename T, typename Y>
+inline void plmdDataToGPU(thrust::device_vector<T> &dvmem, Y &data,
+                          cudaStream_t stream);
+```
+
+```c++
+template <typename T, typename Y>
+inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data,
+                            cudaStream_t stream);
+```
+
+PLMD data types store double precision numbers, when these function are called with a `thrust::device_vector<float>` as argument, they create a temporary `std::vector` to convert and pass the data from/to the GPU.
+In this case, the the DataFrom function ignores the stream parameter to avoid
+starting to convert an array that have not been completely transfered from the GPU
