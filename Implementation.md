@@ -267,12 +267,12 @@ while (N > 1) {
   // doReductionND will need a 2D group size,
   //  - the first dimension is the number of group to use for each dimension,
   //  - the second dimension is the number of dimensions of the array
-  CUDAHELPERS::cubDoReductionND<dataperthread>(
+  CUDAHELPERS::doReductionND<dataperthread>(
         thrust::raw_pointer_cast(cudaVirial.data()),
         thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
         ngroupsVirial, runningThreads, streamVirial);
 
-  CUDAHELPERS::cubDoReduction1D<dataperthread>(
+  CUDAHELPERS::doReduction1D<dataperthread>(
         thrust::raw_pointer_cast(cudaCoordination.data()),
         thrust::raw_pointer_cast(reductionMemoryCoord.data()), N, nGroups,
         runningThreads, streamCoordination);

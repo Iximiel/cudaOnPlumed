@@ -557,12 +557,12 @@ void CudaCoordination<calculateFloat>::calculate() {
     reductionMemoryCoord.resize(nGroups);
 
     dim3 ngroupsVirial(nGroups, 9);
-    CUDAHELPERS::cubDoReductionND<dataperthread>(
+    CUDAHELPERS::doReductionND<dataperthread>(
         thrust::raw_pointer_cast(cudaVirial.data()),
         thrust::raw_pointer_cast(reductionMemoryVirial.data()), N,
         ngroupsVirial, runningThreads, streamVirial);
 
-    CUDAHELPERS::cubDoReduction1D<dataperthread>(
+    CUDAHELPERS::doReduction1D<dataperthread>(
         thrust::raw_pointer_cast(cudaCoordination.data()),
         thrust::raw_pointer_cast(reductionMemoryCoord.data()), N, nGroups,
         runningThreads, streamCoordination);

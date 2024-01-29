@@ -249,8 +249,8 @@ reduction1DKernel(int num_valid,        // number if elements to be reduced
 // the order of the template arguments is not standard: in this way T is deduced
 // and the user can simply specify DATAPERTHREAD
 template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
-void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
-                        const unsigned blocks, const unsigned nthreads) {
+void doReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
+                     const unsigned blocks, const unsigned nthreads) {
   if constexpr (THREADS > 16) {
     // by using this "if constexpr" I do not need to add a specialized
     // declaration to end the loop
@@ -259,8 +259,8 @@ void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
           <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
                                                      outputArray);
     } else {
-      cubDoReduction1D_t<DATAPERTHREAD, T, THREADS / 2>(inputArray, outputArray,
-                                                        len, blocks, nthreads);
+      doReduction1D_t<DATAPERTHREAD, T, THREADS / 2>(inputArray, outputArray,
+                                                     len, blocks, nthreads);
     }
   } else {
     plumed_merror(
@@ -269,9 +269,9 @@ void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
 }
 
 template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
-void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
-                        const unsigned blocks, const unsigned nthreads,
-                        cudaStream_t stream) {
+void doReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
+                     const unsigned blocks, const unsigned nthreads,
+                     cudaStream_t stream) {
   if constexpr (THREADS > 16) {
     // by using this "if constexpr" I do not need to add a specialized
     // declaration to end the loop
@@ -280,7 +280,7 @@ void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
           <<<blocks, THREADS, THREADS * sizeof(T), stream>>>(len, inputArray,
                                                              outputArray);
     } else {
-      cubDoReduction1D_t<DATAPERTHREAD, T, THREADS / 2>(
+      doReduction1D_t<DATAPERTHREAD, T, THREADS / 2>(
           inputArray, outputArray, len, blocks, nthreads, stream);
     }
   } else {
@@ -290,20 +290,20 @@ void cubDoReduction1D_t(T *inputArray, T *outputArray, const unsigned int len,
 }
 
 template <unsigned DATAPERTHREAD, typename T>
-void cubDoReduction1D(T *inputArray, T *outputArray, const size_t len,
-                      const unsigned blocks, const size_t nthreads) {
+void doReduction1D(T *inputArray, T *outputArray, const size_t len,
+                   const unsigned blocks, const size_t nthreads) {
 
-  cubDoReduction1D_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
-                                    nthreads);
+  doReduction1D_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
+                                 nthreads);
 }
 
 template <unsigned DATAPERTHREAD, typename T>
-void cubDoReduction1D(T *inputArray, T *outputArray, const size_t len,
-                      const unsigned blocks, const size_t nthreads,
-                      cudaStream_t stream) {
+void doReduction1D(T *inputArray, T *outputArray, const size_t len,
+                   const unsigned blocks, const size_t nthreads,
+                   cudaStream_t stream) {
 
-  cubDoReduction1D_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
-                                    nthreads, stream);
+  doReduction1D_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks, nthreads,
+                                 stream);
 }
 
 template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
@@ -330,8 +330,8 @@ reductionNDKernel(int num_valid,        // number if elements to be reduced
 // the order of the template arguments is not standard: in this way T is deduced
 // and the user can simply specify DATAPERTHREAD
 template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
-void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
-                        const dim3 blocks, const unsigned nthreads) {
+void doReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
+                     const dim3 blocks, const unsigned nthreads) {
   if constexpr (THREADS > 16) {
     // by using this "if constexpr" I do not need to add a specialized
     // declaration to end the loop
@@ -340,8 +340,8 @@ void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
           <<<blocks, THREADS, THREADS * sizeof(T)>>>(len, inputArray,
                                                      outputArray);
     } else {
-      cubDoReductionND_t<DATAPERTHREAD, T, THREADS / 2>(inputArray, outputArray,
-                                                        len, blocks, nthreads);
+      doReductionND_t<DATAPERTHREAD, T, THREADS / 2>(inputArray, outputArray,
+                                                     len, blocks, nthreads);
     }
   } else {
     plumed_merror(
@@ -350,9 +350,9 @@ void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
 }
 
 template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
-void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
-                        const dim3 blocks, const unsigned nthreads,
-                        cudaStream_t stream) {
+void doReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
+                     const dim3 blocks, const unsigned nthreads,
+                     cudaStream_t stream) {
   if constexpr (THREADS > 16) {
     // by using this "if constexpr" I do not need to add a specialized
     // declaration to end the loop
@@ -361,7 +361,7 @@ void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
           <<<blocks, THREADS, THREADS * sizeof(T), stream>>>(len, inputArray,
                                                              outputArray);
     } else {
-      cubDoReductionND_t<DATAPERTHREAD, T, THREADS / 2>(
+      doReductionND_t<DATAPERTHREAD, T, THREADS / 2>(
           inputArray, outputArray, len, blocks, nthreads, stream);
     }
   } else {
@@ -371,20 +371,20 @@ void cubDoReductionND_t(T *inputArray, T *outputArray, const unsigned int len,
 }
 
 template <unsigned DATAPERTHREAD, typename T>
-void cubDoReductionND(T *inputArray, T *outputArray, const unsigned int len,
-                      const dim3 blocks, const unsigned nthreads) {
+void doReductionND(T *inputArray, T *outputArray, const unsigned int len,
+                   const dim3 blocks, const unsigned nthreads) {
 
-  cubDoReductionND_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
-                                    nthreads);
+  doReductionND_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
+                                 nthreads);
 }
 
 template <unsigned DATAPERTHREAD, typename T>
-void cubDoReductionND(T *inputArray, T *outputArray, const unsigned int len,
-                      const dim3 blocks, const unsigned nthreads,
-                      cudaStream_t stream) {
+void doReductionND(T *inputArray, T *outputArray, const unsigned int len,
+                   const dim3 blocks, const unsigned nthreads,
+                   cudaStream_t stream) {
 
-  cubDoReductionND_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks,
-                                    nthreads, stream);
+  doReductionND_t<DATAPERTHREAD>(inputArray, outputArray, len, blocks, nthreads,
+                                 stream);
 }
 } // namespace CUDAHELPERS
 #endif //__PLUMED_cuda_helpers_cuh

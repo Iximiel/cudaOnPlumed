@@ -17,7 +17,7 @@ The call to the reduction kernels is mediated by templated interface functions.
 
 ```c++
 template <unsigned DATAPERTHREAD, typename T>
-void cubDoReduction1D(
+void doReduction1D(
   T *inputArray,         //the GPU-pointer to the input data
   T *outputArray,        //the GPU-pointer to the output data
   const size_t len,      //the lenght of the input array
@@ -28,7 +28,7 @@ void cubDoReduction1D(
 ```
 ```c++
 template <unsigned DATAPERTHREAD, typename T>
-void cubDoReductionND(
+void doReductionND(
   T *inputArray,         //the GPU-pointer to the input data
   T *outputArray,        //the GPU-pointer to the output data
   const size_t len,      //the lenght of the input array
@@ -58,7 +58,7 @@ T drive(const int threads, thrust::host_vector<T> &data){
     // decide the number of groups to be used
     unsigned groups = ceil(double(N) / (runningThreads * dataperthread));
     returnData.resize(groups);
-    cubDoReduction1D<dataperthread>(
+    doReduction1D<dataperthread>(
         thrust::raw_pointer_cast(gpudata.data()),
         thrust::raw_pointer_cast(returnData.data()), N, groups,
         runningThreads);
