@@ -548,7 +548,8 @@ void CudaCoordination<calculateFloat>::calculate() {
   auto N = nat;
 
   while (N > 1) {
-    size_t runningThreads = CUDAHELPERS::threadsPerBlock(N, maxNumThreads);
+    size_t runningThreads = CUDAHELPERS::threadsPerBlock(
+        ceil(double(N) / dataperthread), maxNumThreads);
 
     unsigned nGroups = ceil(double(N) / (runningThreads * dataperthread));
 
