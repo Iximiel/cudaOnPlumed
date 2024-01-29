@@ -1,12 +1,23 @@
 # Implementation
 
-Small disclaimer: the code I am presenting here is a simplified version of the actual code that is avaiable as example implementation in this [repository](https://github.com/Iximiel/cudaOnPlumed). The actual implementation has type templates and supports pbcs. These particulares are not useful in understanding the basis for a plumed implementation of a  simple CV.
+Small disclaimer: the code I am presenting here is a simplified version of the
+actual code that is available as an example implementation in this
+[repository](https://github.com/Iximiel/cudaOnPlumed).
+The actual implementation has type templates and supports pbcs.
+These particulars are not useful in understanding the basis for a plumed
+implementation of a  simple CV.
 
-It this is not the first tiime you read this I have updated the code on the repository to use the NVIDIA's [CCCL](https://github.com/NVIDIA/cccl) API. You may find some changes in the code.
-The code changes are not radical an I may have missed something while updating the page, always refer toe the repository for an up-to-date code.
+If this is not the first time you read this I have updated the code on the
+repository to use the NVIDIA's [CCCL](https://github.com/NVIDIA/cccl) API.
+You may find some changes in the code.
+The code changes are not radical and I may have missed something while updating
+the page, always refer to the repository for an up-to-date code.
 
 ## The switching function
-In this case the coordination is calculated with $\frac{1}{2} \sum_{i\lt{}nat}^{i} \sum_{j\lt{}nat,j\neq i}^{j} f(d_{ij})$, where $d_{ij}$ is the distances between atom $i$ and $j$, and $f(x)$ is a function that usually has the form
+In this case the coordination is calculated with
+$\frac{1}{2} \sum_{i\lt{}nat}^{i} \sum_{j\lt{}nat,j\neq i}^{j} f(d_{ij})$, 
+where $d_{ij}$ is the distances between atom $i$ and $j$, and $f(x)$ is a
+function that usually has the form
 
 $$
 f(x)=\begin{cases}
@@ -18,17 +29,23 @@ $$
 
 and $s(x)$ is a switching function that links smoothly 1 to 0 between $d_0$ and $d_{max}$
 
-In this case I used the RATIONAL function like in the default Plumed implementation: $s(r)=\frac{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{m} }$.
+In this case, I used the RATIONAL function like in the default Plumed implementation:
+$s(r)=\frac{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r - d_0 }{ r_0 }\right)^{m} }$.
 
-But in this case, for simplicity, the implementation that I am showing will not use the parameter $d_0$, so $s(r)=\frac{ 1 - \left(\frac{ r }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r }{ r_0 }\right)^{m} }$.
+But in this case, for simplicity, the implementation that I am showing will not
+use the parameter
+$d_0$, so $s(r)=\frac{ 1 - \left(\frac{ r }{ r_0 }\right)^{n} }{ 1 - \left(\frac{ r }{ r_0 }\right)^{m} }$.
 
-Like in standard plumed implementation, the switching has a stretch parameter: if $s(d_{max}) = shift $ and $stretch=\frac{1}{s(0)-s(d_{max})}$, $s(x)$ becames $s^s(x)=s(x)*stretch+shift$
+Like in standard plumed implementation, the switching has a stretch parameter:
+if $s(d_{max}) = shift $ and $stretch=\frac{1}{s(0)-s(d_{max})}$, $s(x)$ 
+becomes $s^s(x)=s(x)*stretch+shift$
 
 ## The kernel and the  \_\_device\_\_ functions
 ### The coord kernel
 
-In the following code snippets the comments helps reading the flow of the code.
-Here the code is presented in a simplified way, without templates for type and without the pbc calculations.
+In the following code snippets, the comments help read the flow of the code.
+Here the code is presented in a simplified way, without templates for type and
+without the pbc calculations.
 
 The simplest kernel for calculating the coordination in a group of atoms is:
 ```c++
@@ -109,17 +126,28 @@ __global__ void getSelfCoord(
 }
 ```
 
-You can view this kernel as the inner body of the nested for loop that can be used to write the most naive serial implementation of the coordination (the outer loop would run on the `i` variable).
+You can view this kernel as the inner body of the nested for loop that can be used
+ to write the most naive serial implementation of the coordination 
+ (the outer loop would run on the `i` variable).
 
-The use of global memory should be limited in a kernel, because accessing global memory is far slower that working on shared memory (that it is not used in this case, shared memory is shared between kernels within a group) or the registers, aka the variables, (the  "local memory") declared within each kernel.
+The use of global memory should be limited in a kernel, because accessing global
+memory is far slower than working on shared memory (that it is not used in this
+case, shared memory is shared between kernels within a group) or the variables,
+(the  "local memory") declared within each kernel.
 
-Here within each kernel I have accumulated the values in local variables and not on the global memory and then update the global memory only at the end of the calculation. Using `mycoord += coord;` instead of `ncoordOut[i] += coord;` within the loop will speed up the calculations.
+Here within each kernel, I have accumulated the values in local variables and not
+ on the global memory and then update the global memory only at the end of the 
+ calculation. Using `mycoord += coord;` instead of `ncoordOut[i] += coord;` 
+ within the loop will speed up the calculations.
 
-In the actual implementation the `float myVirial[9];` and `float d[3];` are presented as a collection of 9 and 3 single declared values to use the registers of the kernels, here are declared as array for clarity.
+In the actual implementation the `float myVirial[9];` and `float d[3];` are 
+presented as a collection of 9 and 3 single declared values to use the registers
+of the kernels, here are declared as an array for clarity.
 
 ### The switching function
 
-The switching parameters are stored in a simple struct: when called, kernels accepts struct variables as inputs, making simpler to pass parameters to functions:
+The switching parameters are stored in a simple struct: when called, kernels
+accept struct variables as inputs, making it simpler to pass parameters to functions:
 ```c++
 struct rationalSwitchParameters {
   float dmaxSQ = std::numeric_limits<float>::max();
@@ -131,7 +159,10 @@ struct rationalSwitchParameters {
 };
 ```
 
-`calculateSqr` is a simple interface to the actual switching function, and takes the squared distance and prepares it for the actual rational function (by precalculationg $\left(\frac{ r }{ r_0 }\right)$). It is a rewriting of the `PLMD::SwitchingFunction::calculateSqr` method as a `__device__` function:
+`calculateSqr` is a simple interface to the actual switching function and takes
+the squared distance and prepares it for the actual rational function (by
+precalculating $\left(\frac{ r }{ r_0 }\right)$). It is a rewriting of the 
+`PLMD::SwitchingFunction::calculateSqr` method as a `__device__` function:
 ```c++
 //device functions can called by other __device__ functions or kernel on the device, but not from the host
 __device__ float
@@ -181,28 +212,35 @@ __device__ float pcuda_Rational(const float rdist, const int NN,
 }
 ```
 
-From what I [understood](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#noinline-and-forceinline) the compilers tend to inline `__device__` functions.
+From what I [understood](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#noinline-and-forceinline)
+the compilers tend to inline `__device__` functions.
 It is possible to enforce the behaviour with  `__forceinline__` or `__inline_hint__`
 
 
 ## Interfacing to cuda: invoking the kernel and the reductions
-
-This section is changed heavily since the previous version
-Go to the [helpers](Helpers.md) page for details on the reduction and on how the CCCL interface.
+This section has changed heavily since the previous version
+Go to the [helpers](Helpers.md) page for details on the reduction and on how the
+ CCCL interface.
 
 ### Calling the kernel in the calculate() method
 
 As in any other `PLMD::Action` we have a `calculate()` method.
 
-We start with getting the atoms positions, and we immediately load them into the GPU:
+We start with getting the positions of the atoms, and we immediately load them 
+into the GPU:
 ```c++
 //cudaPositions is a thrust::device_vector<float>
 auto positions = getPositions();  
 CUDAHELPERS::plmdDataToGPU(cudaPositions, positions, streamDerivatives);
 ```
-during the construction of the action the number of atoms has already been initialized, so no need to resize `cudaPositions` (for safety reason `plmdDataToGPU` will do it for you) or `cudaDerivatives`. Moreover we are using the async version of `plmdDataToGPU`, so we can set up other things on the CPU while the data is copyied.
+during the construction of the action the number of atoms has already been
+initialized, so no need to resize `cudaPositions` (for safety reasons
+`plmdDataToGPU` will do it for you) or `cudaDerivatives`. Moreover, we are using
+the async version of `plmdDataToGPU`, so we can set up other things on the CPU
+while the data is copied.
 
-Then we fetch the number of atoms and we prepare the memory and the number of groups for calling the kernel:
+Then we fetch the number of atoms and we prepare the memory and the number of
+groups for calling the kernel:
 ```c++
 auto nat = positions.size();
 constexpr unsigned nthreads = 512;
@@ -214,9 +252,11 @@ unsigned ngroups = ceil(double(nat) / nthreads);
 cudaCoordination.resize(nat);
 cudaVirial.resize(nat * 9);
 ```
-`cudaCoordination` and `cudaVirial` are the outputs of the kernel, and will need to be reduced after.
+`cudaCoordination` and `cudaVirial` are the outputs of the kernel and will need
+to be reduced after.
 
-the kernel is called with the `<<<>>>` syntax, between the three brackets we specify 2 to 4 informations:
+the kernel is called with the `<<<>>>` syntax, between the three brackets we
+specify 2 to 4 information:
 - the number of groups to use
 - the number of threads per group
 - the eventual quantity of shared memory
@@ -233,12 +273,12 @@ getCoord<<<ngroups, nthreads, 0, streamDerivatives>>>(
     thrust::raw_pointer_cast(cudaDerivatives.data()),
     thrust::raw_pointer_cast(cudaVirial.data()));
 ```
-###
+### Moving the derivatives to the host RAM
 
-Befre meoving the data again on the CPU's RAM we want to be sure that the [kernel](#the-coord-kernel) has finished its calculations bu
-calliing `cudaDeviceSynchronize();`.
+Before moving the data again on the CPU's RAM we want to be sure that the
+[kernel](#the-coord-kernel) has finished its calculations by calling `cudaDeviceSynchronize();`.
 
-Then we enqueue an async opy of the derivatives.
+Then we enqueue an async copy of the derivatives.
 
 ```c++
 cudaDeviceSynchronize();
@@ -246,7 +286,10 @@ CUDAHELPERS::plmdDataFromGPU(cudaDerivatives, deriv, streamDerivatives);
 ```
 ### Calling the reductions in the calculate() method
 
-After the [kernel](#the-coord-kernel) finishes we have the virial and the coordination accumulated for each atom: we proceed to accumulate the results for the whole system with the utilities in cudaHelpers.cuh, that are written using the building blocs of CCCL/cub.
+After the [kernel](#the-coord-kernel) finishes we have the virial and the
+coordination accumulated for each atom: we proceed to accumulate the results for
+the whole system with the utilities in _cudaHelpers.cuh_, which are written using
+the building blocks of CCCL/cub.
 The reduction algorithm is recursively called by the following loop.
 
 ```c++
@@ -291,15 +334,20 @@ while (N > 1) {
 }
 ```
 
-The swaps of the memory are there because the output of a iteration reduction became the input of the next iteration and we want to use the already allocated data as the next result recipient.
+The swaps of the memory are there because the output of an iteration reduction
+became the input of the next iteration and we want to use the already allocated
+data as the next result recipient.
 The last iteration (where `nGroups == 1`) enqueue the async version of the GPU to CPU copies.
 
-The ND-reduction expects the data to be organized as a series of concatenated arrays (this is also know as a block arrangement, at least in the cub manual):
+The ND-reduction expects the data to be organized as a series of concatenated
+arrays (this is also known as a block arrangement, at least in the cub manual):
 `[x0, x1, x2, ..., xn-2, xn-1, y0, y1, y2, ..., yn-2, yn-1, z0,... ]` and so on.
 
 ### Finalizing the results
 
-After the reduction/accumulation the data is then uploaded to Plumed with the standard procedure, again we use `cudaDeviceSynchronize();` for be sure that all the data have been moved to the CPU:
+After the reduction/accumulation, the data is then uploaded to Plumed with the
+standard procedure, again we use `cudaDeviceSynchronize();` to be sure that all
+the data have been moved to the CPU:
 ```c++
 cudaDeviceSynchronize();
 for (unsigned i = 0; i < deriv.size(); ++i)

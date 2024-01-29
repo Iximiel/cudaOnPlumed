@@ -1,17 +1,20 @@
 # The CUDAHELPERS library
 
-This helper library contains an implementation of the reduction algorithm using the [cub](https://nvidia.github.io/cccl/cub/) building blocks and and interface between the [thrust](https://nvidia.github.io/cccl/thrust/) vectors  and the PLMD::Vector and PLMD::Tensor classes.
+This helper library contains an implementation of the reduction algorithm 
+using the [cub](https://nvidia.github.io/cccl/cub/) building blocks and the
+ interface between the [thrust](https://nvidia.github.io/cccl/thrust/) vectors
+ and the PLMD::Vector and PLMD::Tensor classes.
 
 The helper library is a header-only library `cudaHelpers.cuh`.
 
-See the [coordination implementation](Implementation.md) for an example on how use the code described here.
+See the [coordination implementation](Implementation.md) for an example of how to use the code described here.
 
 ## The reduction interface
 
-The original version used a plain CUDA C++ reduction and was  implemented following [this guide](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf).
-
-I recommend to try to implement the reduction algorithm by hand before using cub, to have a better picture of the concept and of the algorithm.
-
+The original version used a plain CUDA C++ reduction and was implemented following 
+[this guide](https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf).
+I recommend trying to implement the reduction algorithm by hand before using cub,
+to have a better picture of the concept and of the algorithm.
 
 The call to the reduction kernels is mediated by templated interface functions.
 
@@ -38,11 +41,20 @@ void doReductionND(
   )
 ```
 
-These interfaces ask for a `T*` instead of a `thrust::device_vector<T>` for flexibility, remeber to pass a device pointer, not a CPU pointer.
+These interfaces ask for a `T*` instead of a `thrust::device_vector<T>` 
+for flexibility, remember to pass a device pointer, not a CPU pointer.
 
-The `dim3` type is a triplette of integers defined in the cuda headers that will be used to spawn a 2D (in this case) grid of kernels. The first dimension is the number of expected blocks that should be `ceil(len / (nthreads * DATAPERTHREAD));`, and the second dimension the number of data dimension.
+The `dim3` type is a triplet of integers defined in the cuda headers.
+Here we declare it as a couple of numbers to spawn a 2D (in this case) grid of
+kernels: the first number is the number of groups that will be used, in case 
+there are more data than threads available this will be >1 and then the reduction
+ will need to be applied on the result of the calculation.
+The second number is the number of data arrays that we are processing together, 
+for example, the virial is saved in a format of 9  blocks of consecutive numbers
+ and in that case we will use `dim3{N,9}`.
+In the case of a single array, the 1D version will enqueue a specialized 1D kernel 
 
-These function should be called in a driver that loops on them, for example:
+These functions should be called in a driver that loops on them, for example:
 ```C++
 template<int datperthread,typename T>
 T drive(const int threads, thrust::host_vector<T> &data){
@@ -63,7 +75,7 @@ T drive(const int threads, thrust::host_vector<T> &data){
         thrust::raw_pointer_cast(returnData.data()), N, groups,
         runningThreads);
     if (nGroups > 1) {
-      //swap the data to use the output as input of the next iteration, and using th
+      //swap the data to use the output as input of the next iteration
       gpudata.swap(returnData);
     }
   }
@@ -73,7 +85,9 @@ T drive(const int threads, thrust::host_vector<T> &data){
 }
 
 ```
-this driver 'throws away' the input data (on the gpu) at eac iteration, using the containing array as a container for the output of the next iteration, and using the output.
+this driver 'throws away' the input data (on the GPU) at each iteration, using
+the containing array as a container for the output of the next iteration, 
+and using the output.
 
 
 These interfaces can be called without the stream and the kernels will be serially executed.
@@ -81,9 +95,10 @@ These interfaces can be called without the stream and the kernels will be serial
 
 ## The reduction kernel
 
-Here I am showing only the more ND kernel, the 1D one is exaclty this one, but with the `blockIdx.y * something` parts removed.
+Here I am showing only the ND kernel, the 1D one is like this one, but with 
+the `blockIdx.y * something` parts removed.
 
-The reduction kernels are assembled with cub building bloks
+The reduction kernels are assembled with _cub_ building blocks
 
 ```c++
 template <typename T, int BLOCK_THREADS, int ITEMS_PER_THREAD>
@@ -119,14 +134,17 @@ reductionNDKernel(int num_valid,        // number if elements to be reduced
 }
 ```
 
-The last two arguments of `cub::LoadDirectBlocked` make sure that we are calling the overload that assigns 0 to data when we are trying to load out-of-bound elements. 
-We need to use this becasue we usually do not have powers of 2 data elements to be reduced.
+The last two arguments of `cub::LoadDirectBlocked` make sure that we are calling
+the overload that assigns 0 to data when we are trying to load out-of-bound elements. 
+We need to use this because we usually do not have powers of 2 data elements to be reduced.
 
 ## The PLMD-thrust interface
 
-`cudaHelpers.cuh` contains an interface between `thrust`, `cuda` and the Tensor and Vector class from PLMD.
+_cudaHelpers.cuh_ contains an interface between `thrust`, `cuda` and the `Tensor`
+and `Vector` class from `PLMD`.
 
-Both the DataFrom and the DataTo have an async and a non async version, depending on the presence of the stream variable on call.
+Both the `DataFrom` and the `DataTo` have an async and a non-async overload,
+depending on the presence of the `stream` variable on call.
 
 ```c++
 template <typename T, typename Y>
@@ -140,6 +158,8 @@ inline void plmdDataFromGPU(thrust::device_vector<T> &dvmem, Y &data,
                             cudaStream_t stream);
 ```
 
-PLMD data types store double precision numbers, when these function are called with a `thrust::device_vector<float>` as argument, they create a temporary `std::vector` to convert and pass the data from/to the GPU.
-In this case, the the DataFrom function ignores the stream parameter to avoid
-starting to convert an array that have not been completely transfered from the GPU
+`PLMD` data types store double precision numbers, when these functions are called
+with a `thrust::device_vector<float>` as argument, they create a temporary 
+`std::vector` to convert and pass the data from/to the GPU.
+In this case, the `DataFrom` function ignores the stream parameter to avoid
+starting to convert an array that has not been completely transferred from the GPU
