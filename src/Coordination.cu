@@ -16,13 +16,15 @@
    You should have received a copy of the GNU Lesser General Public License
    along with cudaOnPlumed.  If not, see <http://www.gnu.org/licenses/>.
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
-#include "plumed/colvar/CoordinationBase.h"
+
 #include "plumed/core/ActionRegister.h"
 #include "plumed/tools/NeighborList.h"
 #include "plumed/tools/SwitchingFunction.h"
 
 #include "cudaHelpers.cuh"
 // #include "ndReduction.h"
+
+#include "Coordination.cuh"
 
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_reduce.cuh>
@@ -81,47 +83,6 @@ CUDACOORDINATION GROUPA=group R_0=0.3
 */
 //+ENDPLUMEDOC
 
-// these constant will be used within the kernels
-template <typename calculateFloat> struct rationalSwitchParameters {
-  calculateFloat dmaxSQ = std::numeric_limits<calculateFloat>::max();
-  calculateFloat invr0_2 = 1.0; // r0=1
-  calculateFloat stretch = 1.0;
-  calculateFloat shift = 0.0;
-  int nn = 6;
-  int mm = 12;
-};
-
-template <typename calculateFloat> struct ortoPBCs {
-  calculateFloat invX = 1.0;
-  calculateFloat invY = 1.0;
-  calculateFloat invZ = 1.0;
-  calculateFloat X = 1.0;
-  calculateFloat Y = 1.0;
-  calculateFloat Z = 1.0;
-};
-
-template <typename calculateFloat>
-__device__ calculateFloat pbcClamp(calculateFloat x) {
-  return 0.0;
-}
-
-template <> __device__ __forceinline__ double pbcClamp<double>(double x) {
-  // convert a double to a signed int in round-to-nearest-even mode.
-  return __double2int_rn(x) - x;
-  // return x - floor(x+0.5);
-  // Round argument x to an integer value in single precision floating-point
-  // format.
-  // Uses round to nearest rounding, with ties rounding to even.
-  // return nearbyint(x) - x;
-}
-
-template <> __device__ __forceinline__ float pbcClamp<float>(float x) {
-  // convert a double to a signed int in round-to-nearest-even mode.
-  return __float2int_rn(x) - x;
-  // return x - floorf(x+0.5f);
-  // return nearbyintf(x) - x;
-}
-
 // does not inherit from coordination base because nl is private
 template <typename calculateFloat> class CudaCoordination : public Colvar {
   /// the pointer to the coordinates on the GPU
@@ -139,8 +100,8 @@ template <typename calculateFloat> class CudaCoordination : public Colvar {
   cudaStream_t streamCoordination;
 
   unsigned maxNumThreads = 512;
-  rationalSwitchParameters<calculateFloat> switchingParameters;
-  ortoPBCs<calculateFloat> myPBC;
+  PLMD::GPU::rationalSwitchParameters<calculateFloat> switchingParameters;
+  PLMD::GPU::ortoPBCs<calculateFloat> myPBC;
 
   bool pbc{true};
   void setUpPermanentGPUMemory();
@@ -185,79 +146,6 @@ void CudaCoordination<calculateFloat>::registerKeywords(Keywords &keys) {
   keys.add("compulsory", "D_MAX", "0.0",
            "The cut off of the switching function");
 }
-
-template <typename calculateFloat>
-__device__ __forceinline__ calculateFloat pcuda_fastpow(calculateFloat base,
-                                                        int expo) {
-  if (expo < 0) {
-    expo = -expo;
-    base = 1.0 / base;
-  }
-  calculateFloat result = 1.0;
-  while (expo) {
-    if (expo & 1)
-      result *= base;
-    expo >>= 1;
-    base *= base;
-  }
-  return result;
-}
-
-template <typename calculateFloat> __device__ calculateFloat pcuda_eps() {
-  return 0;
-}
-
-template <> constexpr __device__ float pcuda_eps<float>() {
-  return FLT_EPSILON * 10.0f;
-}
-template <> constexpr __device__ double pcuda_eps<double>() {
-  return DBL_EPSILON * 10.0;
-}
-
-template <typename calculateFloat>
-__device__ __forceinline__ calculateFloat
-pcuda_Rational(const calculateFloat rdist, const int NN, const int MM,
-               calculateFloat &dfunc) {
-  calculateFloat result;
-  if (2 * NN == MM) {
-    // if 2*N==M, then (1.0-rdist^N)/(1.0-rdist^M) = 1.0/(1.0+rdist^N)
-    calculateFloat rNdist = pcuda_fastpow(rdist, NN - 1);
-    result = 1.0 / (1 + rNdist * rdist);
-    dfunc = -NN * rNdist * result * result;
-  } else {
-    if (rdist > (1. - pcuda_eps<calculateFloat>()) &&
-        rdist < (1 + pcuda_eps<calculateFloat>())) {
-
-      result = NN / MM;
-      dfunc = 0.5 * NN * (NN - MM) / MM;
-    } else {
-      calculateFloat rNdist = pcuda_fastpow(rdist, NN - 1);
-      calculateFloat rMdist = pcuda_fastpow(rdist, MM - 1);
-      calculateFloat num = 1. - rNdist * rdist;
-      calculateFloat iden = 1.0 / (1.0 - rMdist * rdist);
-      result = num * iden;
-      dfunc = ((-NN * rNdist * iden) + (result * (iden * MM) * rMdist));
-    }
-  }
-  return result;
-}
-
-template <typename calculateFloat>
-__global__ void getpcuda_Rational(const calculateFloat *rdists, const int NN,
-                                  const int MM, calculateFloat *dfunc,
-                                  calculateFloat *res) {
-  const int i = threadIdx.x + blockIdx.x * blockDim.x;
-  if (rdists[i] <= 0.) {
-    res[i] = 1.;
-    dfunc[i] = 0.0;
-  } else
-    res[i] = pcuda_Rational(rdists[i], NN, MM, dfunc[i]);
-  // printf("stretch: %i: %f -> %f\n",i,rdists[i],res[i]);
-}
-
-// __global__ void getConst() {
-//   printf("Cuda: cu_epsilon = %f\n", cu_epsilon);
-// }
 
 template <typename calculateFloat>
 CudaCoordination<calculateFloat>::CudaCoordination(const ActionOptions &ao)
@@ -330,10 +218,10 @@ CudaCoordination<calculateFloat>::CudaCoordination(const ActionOptions &ao)
       thrust::device_vector<calculateFloat> dummydfunc(2);
       thrust::device_vector<calculateFloat> resZeroMax(2);
 
-      getpcuda_Rational<<<1, 2>>>(thrust::raw_pointer_cast(inputZeroMax.data()),
-                                  nn_, mm_,
-                                  thrust::raw_pointer_cast(dummydfunc.data()),
-                                  thrust::raw_pointer_cast(resZeroMax.data()));
+      PLMD::GPU::getpcuda_Rational<<<1, 2>>>(
+          thrust::raw_pointer_cast(inputZeroMax.data()), nn_, mm_,
+          thrust::raw_pointer_cast(dummydfunc.data()),
+          thrust::raw_pointer_cast(resZeroMax.data()));
 
       switchingParameters.stretch = 1.0 / (resZeroMax[0] - resZeroMax[1]);
       switchingParameters.shift = -resZeroMax[1] * switchingParameters.stretch;
@@ -361,26 +249,6 @@ CudaCoordination<calculateFloat>::~CudaCoordination() {
   cudaStreamDestroy(streamCoordination);
 }
 
-template <typename calculateFloat>
-__device__ __forceinline__ calculateFloat
-calculateSqr(const calculateFloat distancesq,
-             const rationalSwitchParameters<calculateFloat> switchingParameters,
-             calculateFloat &dfunc) {
-  calculateFloat result = 0.0;
-  dfunc = 0.0;
-  if (distancesq < switchingParameters.dmaxSQ) {
-    const calculateFloat rdist_2 = distancesq * switchingParameters.invr0_2;
-    result = pcuda_Rational(rdist_2, switchingParameters.nn / 2,
-                            switchingParameters.mm / 2, dfunc);
-    // chain rule:
-    dfunc *= 2 * switchingParameters.invr0_2;
-    // cu_stretch:
-    result = result * switchingParameters.stretch + switchingParameters.shift;
-    dfunc *= switchingParameters.stretch;
-  }
-  return result;
-}
-
 #define X(I) 3 * I
 #define Y(I) 3 * I + 1
 #define Z(I) 3 * I + 2
@@ -388,8 +256,9 @@ calculateSqr(const calculateFloat distancesq,
 template <bool usePBC, typename calculateFloat>
 __global__ void
 getCoord(const unsigned nat,
-         const rationalSwitchParameters<calculateFloat> switchingParameters,
-         const ortoPBCs<calculateFloat> myPBC,
+         const PLMD::GPU::rationalSwitchParameters<calculateFloat>
+             switchingParameters,
+         const PLMD::GPU::ortoPBCs<calculateFloat> myPBC,
          const calculateFloat *coordinates, const unsigned *trueIndexes,
          calculateFloat *ncoordOut, calculateFloat *devOut,
          calculateFloat *virialOut) {
@@ -437,9 +306,9 @@ getCoord(const unsigned nat,
     // where the third dim is 0 1 2 ^
     // ?
     if constexpr (usePBC) {
-      d_0 = pbcClamp((coordinates[X(j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 = pbcClamp((coordinates[Y(j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 = pbcClamp((coordinates[Z(j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = PLMD::GPU::pbcClamp((coordinates[X(j)] - x) * myPBC.invX) * myPBC.X;
+      d_1 = PLMD::GPU::pbcClamp((coordinates[Y(j)] - y) * myPBC.invY) * myPBC.Y;
+      d_2 = PLMD::GPU::pbcClamp((coordinates[Z(j)] - z) * myPBC.invZ) * myPBC.Z;
     } else {
       d_0 = coordinates[X(j)] - x;
       d_1 = coordinates[Y(j)] - y;
