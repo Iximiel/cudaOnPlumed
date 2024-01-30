@@ -333,11 +333,12 @@ while (N > 1) {
   N = nGroups;
 }
 ```
+The last iteration (where `nGroups == 1`) enqueue the async version of the GPU to CPU copies.
 
 The swaps of the memory are there because the output of an iteration reduction
 became the input of the next iteration and we want to use the already allocated
-data as the next result recipient.
-The last iteration (where `nGroups == 1`) enqueue the async version of the GPU to CPU copies.
+data as the next result recipient. These swap operations do not move the memory, but should exchange the addresses and the data between the two variables.
+
 
 The ND-reduction expects the data to be organized as a series of concatenated
 arrays (this is also known as a block arrangement, at least in the cub manual):
