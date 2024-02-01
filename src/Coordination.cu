@@ -18,6 +18,7 @@
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ */
 
 #include "plumed/core/ActionRegister.h"
+#include "plumed/core/Colvar.h"
 #include "plumed/tools/NeighborList.h"
 #include "plumed/tools/SwitchingFunction.h"
 
