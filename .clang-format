@@ -27,6 +27,11 @@ AlignConsecutiveMacros:
   AcrossComments: false
   AlignCompound: false
   PadOperators: false
+AlignConsecutiveShortCaseStatements:
+  Enabled: false
+  AcrossEmptyLines: false
+  AcrossComments: false
+  AlignCaseColons: false
 AlignEscapedNewlines: Right
 AlignOperands: Align
 AlignTrailingComments:
@@ -47,8 +52,8 @@ AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: MultiLine
 AttributeMacros:
   - __capability
-BinPackArguments: true
-BinPackParameters: true
+BinPackArguments: false
+BinPackParameters: false
 BitFieldColonSpacing: Both
 BraceWrapping:
   AfterCaseLabel: false
@@ -135,6 +140,7 @@ IntegerLiteralSeparator:
   HexMinDigits: 0
 JavaScriptQuotes: Leave
 JavaScriptWrapImports: true
+KeepEmptyLinesAtEOF: false
 KeepEmptyLinesAtTheStartOfBlocks: true
 LambdaBodyIndentation: Signature
 Language: Cpp
@@ -165,6 +171,7 @@ QualifierAlignment: Leave
 ReferenceAlignment: Pointer
 ReflowComments: true
 RemoveBracesLLVM: false
+RemoveParentheses: Leave
 RemoveSemicolon: false
 RequiresClausePosition: OwnLine
 RequiresExpressionIndentation: OuterScope
@@ -182,6 +189,7 @@ SpaceBeforeCaseColon: false
 SpaceBeforeCpp11BracedList: false
 SpaceBeforeCtorInitializerColon: true
 SpaceBeforeInheritanceColon: true
+SpaceBeforeJsonColon: false
 SpaceBeforeParens: ControlStatements
 SpaceBeforeParensOptions:
   AfterControlStatements: true
@@ -196,16 +204,18 @@ SpaceBeforeParensOptions:
 SpaceBeforeRangeBasedForLoopColon: true
 SpaceBeforeSquareBrackets: false
 SpaceInEmptyBlock: false
-SpaceInEmptyParentheses: false
 SpacesBeforeTrailingComments: 1
 SpacesInAngles: Never
-SpacesInCStyleCastParentheses: false
-SpacesInConditionalStatement: false
 SpacesInContainerLiterals: true
 SpacesInLineCommentPrefix:
   Minimum: 1
   Maximum: -1
-SpacesInParentheses: false
+SpacesInParens: Never
+SpacesInParensOptions:
+  InConditionalStatements: false
+  InCStyleCasts: false
+  InEmptyParentheses: false
+  Other: false
 SpacesInSquareBrackets: false
 Standard: Latest
 StatementAttributeLikeMacros:
@@ -215,9 +225,14 @@ StatementMacros:
   - QT_REQUIRE_VERSION
 TabWidth: 8
 UseTab: Never
+VerilogBreakBetweenInstancePorts: true
 WhitespaceSensitiveMacros:
   - BOOST_PP_STRINGIZE
   - CF_SWIFT_NAME
   - NS_SWIFT_NAME
   - PP_STRINGIZE
   - STRINGIZE
+SpaceInEmptyParentheses: false
+SpacesInCStyleCastParentheses: false
+SpacesInConditionalStatement: false
+SpacesInParentheses: false
