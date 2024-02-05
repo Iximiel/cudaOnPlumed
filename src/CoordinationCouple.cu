@@ -318,7 +318,7 @@ getCoordPair (const unsigned couples,
   // local calculation aid
 
   calculateFloat d_0, d_1, d_2;
-  calculateFloat t;
+  // calculateFloat t;
   calculateFloat dfunc;
   calculateFloat coord;
   calculateFloat mydevX;
@@ -333,19 +333,19 @@ getCoordPair (const unsigned couples,
   // where the third dim is 0 1 2 ^
   // ?
   if constexpr (usePBC) {
-    d_0 = PLMD::GPU::pbcClamp ((coordinates[X (j)] - coordinates[X (i)]) *
+    d_0 = PLMD::GPU::pbcClamp ((coordinates[X (i)] - coordinates[X (j)]) *
                                myPBC.invX) *
           myPBC.X;
-    d_1 = PLMD::GPU::pbcClamp ((coordinates[Y (j)] - coordinates[Y (i)]) *
+    d_1 = PLMD::GPU::pbcClamp ((coordinates[Y (i)] - coordinates[Y (j)]) *
                                myPBC.invY) *
           myPBC.Y;
-    d_2 = PLMD::GPU::pbcClamp ((coordinates[Z (j)] - coordinates[Z (i)]) *
+    d_2 = PLMD::GPU::pbcClamp ((coordinates[Z (i)] - coordinates[Z (j)]) *
                                myPBC.invZ) *
           myPBC.Z;
   } else {
-    d_0 = coordinates[X (j)] - coordinates[X (i)];
-    d_1 = coordinates[Y (j)] - coordinates[Y (i)];
-    d_2 = coordinates[Z (j)] - coordinates[Z (i)];
+    d_0 = coordinates[X (i)] - coordinates[X (j)];
+    d_1 = coordinates[Y (i)] - coordinates[Y (j)];
+    d_2 = coordinates[Z (i)] - coordinates[Z (j)];
   }
 
   dfunc = 0.;
@@ -353,33 +353,30 @@ getCoordPair (const unsigned couples,
   ncoordOut[i] = calculateSqr (
       d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
 
-  t = dfunc * d_0;
-  mydevX = t;
+  mydevX = -dfunc * d_0;
 
-  myVirial_0 -= t * d_0;
-  myVirial_1 -= t * d_1;
-  myVirial_2 -= t * d_2;
+  myVirial_0 = mydevX * d_0;
+  myVirial_1 = mydevX * d_1;
+  myVirial_2 = mydevX * d_2;
 
-  t = dfunc * d_1;
-  mydevY = t;
+  mydevY = -dfunc * d_1;
 
-  myVirial_3 -= t * d_0;
-  myVirial_4 -= t * d_1;
-  myVirial_5 -= t * d_2;
+  myVirial_3 = mydevY * d_0;
+  myVirial_4 = mydevY * d_1;
+  myVirial_5 = mydevY * d_2;
 
-  t = dfunc * d_2;
-  mydevZ = t;
+  mydevZ = -dfunc * d_2;
 
-  myVirial_6 -= t * d_0;
-  myVirial_7 -= t * d_1;
-  myVirial_8 -= t * d_2;
+  myVirial_6 = mydevZ * d_0;
+  myVirial_7 = mydevZ * d_1;
+  myVirial_8 = mydevZ * d_2;
 
-  devOut[X (i)] = mydevX;
-  devOut[Y (i)] = mydevY;
-  devOut[Z (i)] = mydevZ;
-  devOut[X (j)] = -mydevX;
-  devOut[Y (j)] = -mydevY;
-  devOut[Z (j)] = -mydevZ;
+  devOut[X (i)] = -mydevX;
+  devOut[Y (i)] = -mydevY;
+  devOut[Z (i)] = -mydevZ;
+  devOut[X (j)] = mydevX;
+  devOut[Y (j)] = mydevY;
+  devOut[Z (j)] = mydevZ;
   // ncoordOut[i] = mycoord;
   virialOut[couples * 0 + i] = myVirial_0;
   virialOut[couples * 1 + i] = myVirial_1;
