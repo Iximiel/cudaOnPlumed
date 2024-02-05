@@ -85,7 +85,9 @@ CUDACOORDINATION GROUPA=group R_0=0.3
 //+ENDPLUMEDOC
 
 // does not inherit from coordination base because nl is private
-template <typename calculateFloat> class CudaCoordinationWB : public Colvar {
+// rename to pair
+template <typename calculateFloat>
+class CudaCoordinationCouple : public Colvar {
   /// the pointer to the coordinates on the GPU
   thrust::device_vector<calculateFloat> cudaPositions;
   /// the pointer to the nn list on the GPU
@@ -101,8 +103,8 @@ template <typename calculateFloat> class CudaCoordinationWB : public Colvar {
   cudaStream_t streamCoordination;
 
   unsigned maxNumThreads = 512;
-  unsigned atomsInA;
-  unsigned atomsInB;
+  unsigned couples;
+
   PLMD::GPU::rationalSwitchParameters<calculateFloat> switchingParameters;
   PLMD::GPU::ortoPBCs<calculateFloat> myPBC;
 
@@ -110,19 +112,19 @@ template <typename calculateFloat> class CudaCoordinationWB : public Colvar {
   void setUpPermanentGPUMemory();
 
 public:
-  explicit CudaCoordinationWB (const ActionOptions &);
-  virtual ~CudaCoordinationWB();
+  explicit CudaCoordinationCouple (const ActionOptions &);
+  virtual ~CudaCoordinationCouple();
   // active methods:
   static void registerKeywords (Keywords &keys);
   void calculate() override;
 };
-using CudaCoordinationWB_d = CudaCoordinationWB<double>;
-using CudaCoordinationWB_f = CudaCoordinationWB<float>;
-PLUMED_REGISTER_ACTION (CudaCoordinationWB_d, "CUDACOORDINATIONWB")
-PLUMED_REGISTER_ACTION (CudaCoordinationWB_f, "CUDACOORDINATIONWBFLOAT")
+using CudaCoordinationCouple_d = CudaCoordinationCouple<double>;
+using CudaCoordinationCouple_f = CudaCoordinationCouple<float>;
+PLUMED_REGISTER_ACTION (CudaCoordinationCouple_d, "CUDACOORDINATIONPAIR")
+PLUMED_REGISTER_ACTION (CudaCoordinationCouple_f, "CUDACOORDINATIONPAIRFLOAT")
 
 template <typename calculateFloat>
-void CudaCoordinationWB<calculateFloat>::setUpPermanentGPUMemory() {
+void CudaCoordinationCouple<calculateFloat>::setUpPermanentGPUMemory() {
   auto nat = getPositions().size();
   cudaPositions.resize (3 * nat);
   cudaDerivatives.resize (3 * nat);
@@ -135,7 +137,7 @@ void CudaCoordinationWB<calculateFloat>::setUpPermanentGPUMemory() {
 }
 
 template <typename calculateFloat>
-void CudaCoordinationWB<calculateFloat>::registerKeywords (Keywords &keys) {
+void CudaCoordinationCouple<calculateFloat>::registerKeywords (Keywords &keys) {
   Colvar::registerKeywords (keys);
 
   keys.add ("optional", "THREADS", "The upper limit of the number of threads");
@@ -154,15 +156,19 @@ void CudaCoordinationWB<calculateFloat>::registerKeywords (Keywords &keys) {
 }
 
 template <typename calculateFloat>
-CudaCoordinationWB<calculateFloat>::CudaCoordinationWB (const ActionOptions &ao)
+CudaCoordinationCouple<calculateFloat>::CudaCoordinationCouple (
+    const ActionOptions &ao)
     : PLUMED_COLVAR_INIT (ao) {
   std::vector<AtomNumber> GroupA;
   parseAtomList ("GROUPA", GroupA);
-  atomsInA = GroupA.size();
 
   std::vector<AtomNumber> GroupB;
   parseAtomList ("GROUPB", GroupB);
-  atomsInB = GroupB.size();
+  couples = GroupB.size();
+
+  if (GroupA.size() != GroupB.size()) {
+    error ("the two gropus should have the same dimensions");
+  }
 
   // todo: improve this
   GroupA.insert (GroupA.end(), GroupB.begin(), GroupB.end());
@@ -259,7 +265,7 @@ CudaCoordinationWB<calculateFloat>::CudaCoordinationWB (const ActionOptions &ao)
 }
 
 template <typename calculateFloat>
-CudaCoordinationWB<calculateFloat>::~CudaCoordinationWB() {
+CudaCoordinationCouple<calculateFloat>::~CudaCoordinationCouple() {
   cudaStreamDestroy (streamDerivatives);
   cudaStreamDestroy (streamVirial);
   cudaStreamDestroy (streamCoordination);
@@ -271,30 +277,32 @@ CudaCoordinationWB<calculateFloat>::~CudaCoordinationWB() {
 
 template <bool usePBC, typename calculateFloat>
 __global__ void
-getCoordwB (const unsigned natActive,
-            const unsigned natLoop,
-            const PLMD::GPU::rationalSwitchParameters<calculateFloat>
-                switchingParameters,
-            const PLMD::GPU::ortoPBCs<calculateFloat> myPBC,
-            const calculateFloat *coordActive,
-            const calculateFloat *coordLoop,
-            const unsigned *trueIndexes,
-            calculateFloat *ncoordOut,
-            calculateFloat *devOut,
-            calculateFloat *virialOut) {
+getCoordPair (const unsigned couples,
+              const PLMD::GPU::rationalSwitchParameters<calculateFloat>
+                  switchingParameters,
+              const PLMD::GPU::ortoPBCs<calculateFloat> myPBC,
+              const calculateFloat *coordinates,
+              const unsigned *trueIndexes,
+              calculateFloat *ncoordOut,
+              calculateFloat *devOut,
+              calculateFloat *virialOut) {
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
-  if (i >= natActive) { // blocks are initializated with 'ceil (nat/threads)'
+  const unsigned j = i + couples;
+  if (i >= couples) { // blocks are initializated with 'ceil (nat/threads)'
     return;
   }
   // we try working with less global memory possible, so we set up a bunch of
   // temporary variables
-  const unsigned idx = trueIndexes[i];
-  // local results
-  calculateFloat mydevX = 0.0;
-  calculateFloat mydevY = 0.0;
-  calculateFloat mydevZ = 0.0;
-  calculateFloat mycoord = 0.0;
+  // const unsigned idx = ;
+  // const unsigned jdx = trueIndexes[j];
+
+  if (trueIndexes[i] == trueIndexes[j]) {
+    return;
+  }
+
+  // calculateFloat mycoord = 0.0;
+
   // the previous version used static array for myVirial and d
   // using explicit variables guarantees that this data will be stored in
   // registers
@@ -308,181 +316,106 @@ getCoordwB (const unsigned natActive,
   calculateFloat myVirial_7 = 0.0;
   calculateFloat myVirial_8 = 0.0;
   // local calculation aid
-  const calculateFloat x = coordActive[X (i)];
-  const calculateFloat y = coordActive[Y (i)];
-  const calculateFloat z = coordActive[Z (i)];
+
   calculateFloat d_0, d_1, d_2;
   calculateFloat t;
   calculateFloat dfunc;
   calculateFloat coord;
-  for (unsigned j = 0; j < natLoop; ++j) {
-    // const unsigned j = threadIdx.y + blockIdx.y * blockDim.y;
+  calculateFloat mydevX;
+  calculateFloat mydevY;
+  calculateFloat mydevZ;
 
-    // Safeguard
-    if (idx == trueIndexes[j])
-      continue;
-    // or may be better to set up an
-    // const unsigned xyz = threadIdx.z
-    // where the third dim is 0 1 2 ^
-    // ?
-    if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
-    } else {
-      d_0 = coordLoop[X (j)] - x;
-      d_1 = coordLoop[Y (j)] - y;
-      d_2 = coordLoop[Z (j)] - z;
-    }
-
-    dfunc = 0.;
-    coord = calculateSqr (
-        d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
-    mycoord += coord;
-
-    t = dfunc * d_0;
-    mydevX -= t;
-
-    myVirial_0 -= t * d_0;
-    myVirial_1 -= t * d_1;
-    myVirial_2 -= t * d_2;
-
-    t = dfunc * d_1;
-    mydevY -= t;
-
-    myVirial_3 -= t * d_0;
-    myVirial_4 -= t * d_1;
-    myVirial_5 -= t * d_2;
-
-    t = dfunc * d_2;
-    mydevZ -= t;
-
-    myVirial_6 -= t * d_0;
-    myVirial_7 -= t * d_1;
-    myVirial_8 -= t * d_2;
+  // Safeguard
+  // if (idx == trueIndexes[j])
+  //   continue;
+  // or may be better to set up an
+  // const unsigned xyz = threadIdx.z
+  // where the third dim is 0 1 2 ^
+  // ?
+  if constexpr (usePBC) {
+    d_0 = PLMD::GPU::pbcClamp ((coordinates[X (j)] - coordinates[X (i)]) *
+                               myPBC.invX) *
+          myPBC.X;
+    d_1 = PLMD::GPU::pbcClamp ((coordinates[Y (j)] - coordinates[Y (i)]) *
+                               myPBC.invY) *
+          myPBC.Y;
+    d_2 = PLMD::GPU::pbcClamp ((coordinates[Z (j)] - coordinates[Z (i)]) *
+                               myPBC.invZ) *
+          myPBC.Z;
+  } else {
+    d_0 = coordinates[X (j)] - coordinates[X (i)];
+    d_1 = coordinates[Y (j)] - coordinates[Y (i)];
+    d_2 = coordinates[Z (j)] - coordinates[Z (i)];
   }
-  // working in global memory ONLY at the end
+
+  dfunc = 0.;
+  // coord +=
+  ncoordOut[i] = calculateSqr (
+      d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
+
+  t = dfunc * d_0;
+  mydevX = t;
+
+  myVirial_0 -= t * d_0;
+  myVirial_1 -= t * d_1;
+  myVirial_2 -= t * d_2;
+
+  t = dfunc * d_1;
+  mydevY = t;
+
+  myVirial_3 -= t * d_0;
+  myVirial_4 -= t * d_1;
+  myVirial_5 -= t * d_2;
+
+  t = dfunc * d_2;
+  mydevZ = t;
+
+  myVirial_6 -= t * d_0;
+  myVirial_7 -= t * d_1;
+  myVirial_8 -= t * d_2;
+
   devOut[X (i)] = mydevX;
   devOut[Y (i)] = mydevY;
   devOut[Z (i)] = mydevZ;
-  ncoordOut[i] = mycoord;
-  virialOut[natActive * 0 + i] = myVirial_0;
-  virialOut[natActive * 1 + i] = myVirial_1;
-  virialOut[natActive * 2 + i] = myVirial_2;
-  virialOut[natActive * 3 + i] = myVirial_3;
-  virialOut[natActive * 4 + i] = myVirial_4;
-  virialOut[natActive * 5 + i] = myVirial_5;
-  virialOut[natActive * 6 + i] = myVirial_6;
-  virialOut[natActive * 7 + i] = myVirial_7;
-  virialOut[natActive * 8 + i] = myVirial_8;
+  devOut[X (j)] = -mydevX;
+  devOut[Y (j)] = -mydevY;
+  devOut[Z (j)] = -mydevZ;
+  // ncoordOut[i] = mycoord;
+  virialOut[couples * 0 + i] = myVirial_0;
+  virialOut[couples * 1 + i] = myVirial_1;
+  virialOut[couples * 2 + i] = myVirial_2;
+  virialOut[couples * 3 + i] = myVirial_3;
+  virialOut[couples * 4 + i] = myVirial_4;
+  virialOut[couples * 5 + i] = myVirial_5;
+  virialOut[couples * 6 + i] = myVirial_6;
+  virialOut[couples * 7 + i] = myVirial_7;
+  virialOut[couples * 8 + i] = myVirial_8;
 }
 
-template <bool usePBC, typename calculateFloat>
-__global__ void
-getDerivB (const unsigned natLoop,
-           const unsigned natActive,
-           const PLMD::GPU::rationalSwitchParameters<calculateFloat>
-               switchingParameters,
-           const PLMD::GPU::ortoPBCs<calculateFloat> myPBC,
-           const calculateFloat *coordLoop,
-           const calculateFloat *coordActive,
-           const unsigned *trueIndexes,
-           calculateFloat *devOut) {
-  // blockDIm are the number of threads in your block
-  const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
-  if (i >= natActive) { // blocks are initializated with 'ceil (nat/threads)'
-    return;
-  }
-  // we try working with less global memory possible, so we set up a bunch of
-  // temporary variables
-  const unsigned idx = trueIndexes[i];
-  // local results
-  calculateFloat mydevX = 0.0;
-  calculateFloat mydevY = 0.0;
-  calculateFloat mydevZ = 0.0;
-  calculateFloat mycoord = 0.0;
-  // the previous version used static array for myVirial and d
-  // using explicit variables guarantees that this data will be stored in
-  // registers
-  calculateFloat myVirial_0 = 0.0;
-  calculateFloat myVirial_1 = 0.0;
-  calculateFloat myVirial_2 = 0.0;
-  calculateFloat myVirial_3 = 0.0;
-  calculateFloat myVirial_4 = 0.0;
-  calculateFloat myVirial_5 = 0.0;
-  calculateFloat myVirial_6 = 0.0;
-  calculateFloat myVirial_7 = 0.0;
-  calculateFloat myVirial_8 = 0.0;
-  // local calculation aid
-  const calculateFloat x = coordActive[X (i)];
-  const calculateFloat y = coordActive[Y (i)];
-  const calculateFloat z = coordActive[Z (i)];
-  calculateFloat d_0, d_1, d_2;
-  calculateFloat t;
-  calculateFloat dfunc;
-  calculateFloat coord;
-  for (unsigned j = 0; j < natLoop; ++j) {
-    // const unsigned j = threadIdx.y + blockIdx.y * blockDim.y;
-
-    // Safeguard
-    if (idx == trueIndexes[j])
-      continue;
-    // or may be better to set up an
-    // const unsigned xyz = threadIdx.z
-    // where the third dim is 0 1 2 ^
-    // ?
-    if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
-    } else {
-      d_0 = coordLoop[X (j)] - x;
-      d_1 = coordLoop[Y (j)] - y;
-      d_2 = coordLoop[Z (j)] - z;
-    }
-
-    dfunc = 0.;
-    t = calculateSqr (
-        d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
-
-    mydevX -= dfunc * d_0;
-
-    mydevY -= dfunc * d_1;
-    mydevZ -= dfunc * d_2;
-  }
-  // working in global memory ONLY at the end
-  devOut[X (i)] = mydevX;
-  devOut[Y (i)] = mydevY;
-  devOut[Z (i)] = mydevZ;
-}
-
-#define getCoordOrthoPBC getCoordwB<true>
-#define getCoordNoPBC getCoordwB<false>
-
-#define getDerivOrthoPBC getDerivB<true>
-#define getDerivNoPBC getDerivB<false>
+#define getCoordOrthoPBC getCoordPair<true>
+#define getCoordNoPBC getCoordPair<false>
 
 template <typename calculateFloat>
-void CudaCoordinationWB<calculateFloat>::calculate() {
+void CudaCoordinationCouple<calculateFloat>::calculate() {
   constexpr unsigned dataperthread = 4;
   auto positions = getPositions();
-
+  auto couples = positions.size() / 2;
+  auto nat = positions.size();
   /***************************copying data on the GPU**************************/
   CUDAHELPERS::plmdDataToGPU (cudaPositions, positions, streamDerivatives);
   /***************************copying data on the GPU**************************/
 
   Tensor virial;
   double coordination;
-  auto deriv = std::vector<Vector> (positions.size());
+  auto deriv = std::vector<Vector> (nat);
 
   // constexpr unsigned nthreads = 512;
 
-  unsigned ngroupsA = ceil (double (atomsInA) / maxNumThreads);
-  unsigned ngroupsB = ceil (double (atomsInB) / maxNumThreads);
+  unsigned ngroups = ceil (double (couples) / maxNumThreads);
 
   /**********************allocating the memory on the GPU**********************/
-  cudaCoordination.resize (atomsInA);
-  cudaVirial.resize (atomsInA * 9);
+  cudaCoordination.resize (couples);
+  cudaVirial.resize (couples * 9);
   /**************************starting the calculations*************************/
   // this calculates the derivatives and prepare the coordination and the
   // virial for the accumulation
@@ -497,49 +430,25 @@ void CudaCoordinationWB<calculateFloat>::calculate() {
     myPBC.invY = 1.0 / myPBC.Y;
     myPBC.invZ = 1.0 / myPBC.Z;
 
-    getCoordOrthoPBC<<<ngroupsA, maxNumThreads, 0, streamDerivatives>>> (
-        atomsInA,
-        atomsInB,
+    getCoordOrthoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
+        couples,
         switchingParameters,
         myPBC,
         thrust::raw_pointer_cast (cudaPositions.data()),
-        thrust::raw_pointer_cast (cudaPositions.data()) + 3 * atomsInA,
         thrust::raw_pointer_cast (cudaTrueIndexes.data()),
         thrust::raw_pointer_cast (cudaCoordination.data()),
         thrust::raw_pointer_cast (cudaDerivatives.data()),
         thrust::raw_pointer_cast (cudaVirial.data()));
-
-    getDerivOrthoPBC<<<ngroupsB, maxNumThreads, 0, streamDerivatives>>> (
-        atomsInA,
-        atomsInB,
-        switchingParameters,
-        myPBC,
-        thrust::raw_pointer_cast (cudaPositions.data()),
-        thrust::raw_pointer_cast (cudaPositions.data()) + 3 * atomsInA,
-        thrust::raw_pointer_cast (cudaTrueIndexes.data()),
-        thrust::raw_pointer_cast (cudaDerivatives.data()) + 3 * atomsInA);
   } else {
-    getCoordNoPBC<<<ngroupsA, maxNumThreads, 0, streamDerivatives>>> (
-        atomsInA,
-        atomsInB,
+    getCoordNoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
+        couples,
         switchingParameters,
         myPBC,
         thrust::raw_pointer_cast (cudaPositions.data()),
-        thrust::raw_pointer_cast (cudaPositions.data()) + 3 * atomsInA,
         thrust::raw_pointer_cast (cudaTrueIndexes.data()),
         thrust::raw_pointer_cast (cudaCoordination.data()),
         thrust::raw_pointer_cast (cudaDerivatives.data()),
         thrust::raw_pointer_cast (cudaVirial.data()));
-
-    getDerivNoPBC<<<ngroupsB, maxNumThreads, 0, streamDerivatives>>> (
-        atomsInA,
-        atomsInB,
-        switchingParameters,
-        myPBC,
-        thrust::raw_pointer_cast (cudaPositions.data()),
-        thrust::raw_pointer_cast (cudaPositions.data()) + 3 * atomsInA,
-        thrust::raw_pointer_cast (cudaTrueIndexes.data()),
-        thrust::raw_pointer_cast (cudaDerivatives.data()) + 3 * atomsInA);
   }
 
   /**************************accumulating the results**************************/
@@ -548,7 +457,7 @@ void CudaCoordinationWB<calculateFloat>::calculate() {
 
   CUDAHELPERS::plmdDataFromGPU (cudaDerivatives, deriv, streamDerivatives);
 
-  auto N = atomsInA;
+  auto N = couples;
 
   while (N > 1) {
     size_t runningThreads = CUDAHELPERS::threadsPerBlock (

@@ -8,7 +8,7 @@ NVLDFLAGS = -dlto
 NV        = nvcc
 soext     = so
 
-OBJS:= Coordination.o CoordinationwB.o cudaHelpers.o
+OBJS:= Coordination.o CoordinationwB.o cudaHelpers.o CoordinationCouple.o
 
 all: Coordination.$(soext)
 
