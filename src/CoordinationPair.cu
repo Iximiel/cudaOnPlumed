@@ -86,8 +86,7 @@ CUDACOORDINATION GROUPA=group R_0=0.3
 
 // does not inherit from coordination base because nl is private
 // rename to pair
-template <typename calculateFloat>
-class CudaCoordinationCouple : public Colvar {
+template <typename calculateFloat> class CudaCoordinationPair : public Colvar {
   /// the pointer to the coordinates on the GPU
   thrust::device_vector<calculateFloat> cudaPositions;
   /// the pointer to the nn list on the GPU
@@ -112,19 +111,19 @@ class CudaCoordinationCouple : public Colvar {
   void setUpPermanentGPUMemory();
 
 public:
-  explicit CudaCoordinationCouple (const ActionOptions &);
-  virtual ~CudaCoordinationCouple();
+  explicit CudaCoordinationPair (const ActionOptions &);
+  virtual ~CudaCoordinationPair();
   // active methods:
   static void registerKeywords (Keywords &keys);
   void calculate() override;
 };
-using CudaCoordinationCouple_d = CudaCoordinationCouple<double>;
-using CudaCoordinationCouple_f = CudaCoordinationCouple<float>;
-PLUMED_REGISTER_ACTION (CudaCoordinationCouple_d, "CUDACOORDINATIONPAIR")
-PLUMED_REGISTER_ACTION (CudaCoordinationCouple_f, "CUDACOORDINATIONPAIRFLOAT")
+using CudaCoordinationPair_d = CudaCoordinationPair<double>;
+using CudaCoordinationPair_f = CudaCoordinationPair<float>;
+PLUMED_REGISTER_ACTION (CudaCoordinationPair_d, "CUDACOORDINATIONPAIR")
+PLUMED_REGISTER_ACTION (CudaCoordinationPair_f, "CUDACOORDINATIONPAIRFLOAT")
 
 template <typename calculateFloat>
-void CudaCoordinationCouple<calculateFloat>::setUpPermanentGPUMemory() {
+void CudaCoordinationPair<calculateFloat>::setUpPermanentGPUMemory() {
   auto nat = getPositions().size();
   cudaPositions.resize (3 * nat);
   cudaDerivatives.resize (3 * nat);
@@ -137,7 +136,7 @@ void CudaCoordinationCouple<calculateFloat>::setUpPermanentGPUMemory() {
 }
 
 template <typename calculateFloat>
-void CudaCoordinationCouple<calculateFloat>::registerKeywords (Keywords &keys) {
+void CudaCoordinationPair<calculateFloat>::registerKeywords (Keywords &keys) {
   Colvar::registerKeywords (keys);
 
   keys.add ("optional", "THREADS", "The upper limit of the number of threads");
@@ -156,7 +155,7 @@ void CudaCoordinationCouple<calculateFloat>::registerKeywords (Keywords &keys) {
 }
 
 template <typename calculateFloat>
-CudaCoordinationCouple<calculateFloat>::CudaCoordinationCouple (
+CudaCoordinationPair<calculateFloat>::CudaCoordinationPair (
     const ActionOptions &ao)
     : PLUMED_COLVAR_INIT (ao) {
   std::vector<AtomNumber> GroupA;
@@ -265,7 +264,7 @@ CudaCoordinationCouple<calculateFloat>::CudaCoordinationCouple (
 }
 
 template <typename calculateFloat>
-CudaCoordinationCouple<calculateFloat>::~CudaCoordinationCouple() {
+CudaCoordinationPair<calculateFloat>::~CudaCoordinationPair() {
   cudaStreamDestroy (streamDerivatives);
   cudaStreamDestroy (streamVirial);
   cudaStreamDestroy (streamCoordination);
@@ -355,45 +354,45 @@ getCoordPair (const unsigned couples,
 
   mydevX = dfunc * d_0;
 
-  myVirial_0 = mydevX * d_0;
-  myVirial_1 = mydevX * d_1;
-  myVirial_2 = mydevX * d_2;
+  myVirial_0 -= mydevX * d_0;
+  myVirial_1 -= mydevX * d_1;
+  myVirial_2 -= mydevX * d_2;
 
   mydevY = dfunc * d_1;
 
-  myVirial_3 = mydevY * d_0;
-  myVirial_4 = mydevY * d_1;
-  myVirial_5 = mydevY * d_2;
+  myVirial_3 -= mydevY * d_0;
+  myVirial_4 -= mydevY * d_1;
+  myVirial_5 -= mydevY * d_2;
 
   mydevZ = dfunc * d_2;
 
-  myVirial_6 = mydevZ * d_0;
-  myVirial_7 = mydevZ * d_1;
-  myVirial_8 = mydevZ * d_2;
+  myVirial_6 -= mydevZ * d_0;
+  myVirial_7 -= mydevZ * d_1;
+  myVirial_8 -= mydevZ * d_2;
 
-  devOut[X (i)] = mydevX;
-  devOut[Y (i)] = mydevY;
-  devOut[Z (i)] = mydevZ;
-  devOut[X (j)] = -mydevX;
-  devOut[Y (j)] = -mydevY;
-  devOut[Z (j)] = -mydevZ;
+  devOut[X (i)] = -mydevX;
+  devOut[Y (i)] = -mydevY;
+  devOut[Z (i)] = -mydevZ;
+  devOut[X (j)] = mydevX;
+  devOut[Y (j)] = mydevY;
+  devOut[Z (j)] = mydevZ;
   // ncoordOut[i] = mycoord;
-  virialOut[couples * 0 + i] = -myVirial_0;
-  virialOut[couples * 1 + i] = -myVirial_1;
-  virialOut[couples * 2 + i] = -myVirial_2;
-  virialOut[couples * 3 + i] = -myVirial_3;
-  virialOut[couples * 4 + i] = -myVirial_4;
-  virialOut[couples * 5 + i] = -myVirial_5;
-  virialOut[couples * 6 + i] = -myVirial_6;
-  virialOut[couples * 7 + i] = -myVirial_7;
-  virialOut[couples * 8 + i] = -myVirial_8;
+  virialOut[couples * 0 + i] = myVirial_0;
+  virialOut[couples * 1 + i] = myVirial_1;
+  virialOut[couples * 2 + i] = myVirial_2;
+  virialOut[couples * 3 + i] = myVirial_3;
+  virialOut[couples * 4 + i] = myVirial_4;
+  virialOut[couples * 5 + i] = myVirial_5;
+  virialOut[couples * 6 + i] = myVirial_6;
+  virialOut[couples * 7 + i] = myVirial_7;
+  virialOut[couples * 8 + i] = myVirial_8;
 }
 
 #define getCoordOrthoPBC getCoordPair<true>
 #define getCoordNoPBC getCoordPair<false>
 
 template <typename calculateFloat>
-void CudaCoordinationCouple<calculateFloat>::calculate() {
+void CudaCoordinationPair<calculateFloat>::calculate() {
   constexpr unsigned dataperthread = 4;
   auto positions = getPositions();
   auto couples = positions.size() / 2;
@@ -426,7 +425,7 @@ void CudaCoordinationCouple<calculateFloat>::calculate() {
     myPBC.invX = 1.0 / myPBC.X;
     myPBC.invY = 1.0 / myPBC.Y;
     myPBC.invZ = 1.0 / myPBC.Z;
-
+    log.printf (">>>>>>>>>>>>>>>>>>>>  %f %f %f\n", myPBC.X, myPBC.Y, myPBC.Z);
     getCoordOrthoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
         couples,
         switchingParameters,
