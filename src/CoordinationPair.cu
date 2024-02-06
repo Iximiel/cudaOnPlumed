@@ -166,7 +166,7 @@ CudaCoordinationPair<calculateFloat>::CudaCoordinationPair (
   couples = GroupB.size();
 
   if (GroupA.size() != GroupB.size()) {
-    error ("the two gropus should have the same dimensions");
+    error ("the two groups must have the same dimensions");
   }
 
   // todo: improve this
@@ -332,15 +332,12 @@ getCoordPair (const unsigned couples,
   // where the third dim is 0 1 2 ^
   // ?
   if constexpr (usePBC) {
-    d_0 = PLMD::GPU::pbcClamp ((coordinates[X (j)] - coordinates[X (i)]) *
-                               myPBC.invX) *
-          myPBC.X;
-    d_1 = PLMD::GPU::pbcClamp ((coordinates[Y (j)] - coordinates[Y (i)]) *
-                               myPBC.invY) *
-          myPBC.Y;
-    d_2 = PLMD::GPU::pbcClamp ((coordinates[Z (j)] - coordinates[Z (i)]) *
-                               myPBC.invZ) *
-          myPBC.Z;
+    d_0 = myPBC.X * PLMD::GPU::pbcClamp (
+                        (coordinates[X (j)] - coordinates[X (i)]) * myPBC.invX);
+    d_1 = myPBC.Y * PLMD::GPU::pbcClamp (
+                        (coordinates[Y (j)] - coordinates[Y (i)]) * myPBC.invY);
+    d_2 = myPBC.Z * PLMD::GPU::pbcClamp (
+                        (coordinates[Z (j)] - coordinates[Z (i)]) * myPBC.invZ);
   } else {
     d_0 = coordinates[X (j)] - coordinates[X (i)];
     d_1 = coordinates[Y (j)] - coordinates[Y (i)];
@@ -425,7 +422,6 @@ void CudaCoordinationPair<calculateFloat>::calculate() {
     myPBC.invX = 1.0 / myPBC.X;
     myPBC.invY = 1.0 / myPBC.Y;
     myPBC.invZ = 1.0 / myPBC.Z;
-    log.printf (">>>>>>>>>>>>>>>>>>>>  %f %f %f\n", myPBC.X, myPBC.Y, myPBC.Z);
     getCoordOrthoPBC<<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
         couples,
         switchingParameters,

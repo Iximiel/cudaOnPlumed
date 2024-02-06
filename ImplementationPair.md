@@ -18,11 +18,12 @@ getCoord (const unsigned couples,
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
   const unsigned j = i + couples;
-  if (i >= couples) { // blocks are initializated with 'ceil (nat/threads)'
+  
+  // blocks are initializated with 'ceil (couples/threads)'
+  if (i >= couples) { 
     return;
   }
-  // we try working with less global memory possible, so we set up a bunch of
-  // temporary variables
+  
   const unsigned idx = trueIndexes[i];
   const unsigned jdx = trueIndexes[j];
   if (idx == jdx) {
@@ -51,12 +52,12 @@ getCoord (const unsigned couples,
   mydevY = dfunc * d_1;
   mydevZ = dfunc * d_2;
 
-  devOut[X (i)] = mydevX;
-  devOut[Y (i)] = mydevY;
-  devOut[Z (i)] = mydevZ;
-  devOut[X (j)] = -mydevX;
-  devOut[Y (j)] = -mydevY;
-  devOut[Z (j)] = -mydevZ;
+  devOut[X (i)] = -mydevX;
+  devOut[Y (i)] = -mydevY;
+  devOut[Z (i)] = -mydevZ;
+  devOut[X (j)] = mydevX;
+  devOut[Y (j)] = mydevY;
+  devOut[Z (j)] = mydevZ;
   
   virialOut[couples * 0 + i] = -dfunc * d[0] * d[0];
   virialOut[couples * 1 + i] = -dfunc * d[0] * d[1];
