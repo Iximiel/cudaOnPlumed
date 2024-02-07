@@ -333,11 +333,11 @@ getCoordPair (const unsigned couples,
   // ?
   if constexpr (usePBC) {
     d_0 = myPBC.X * PLMD::GPU::pbcClamp (
-                        (coordinates[X (j)] - coordinates[X (i)]) * myPBC.invX);
+                        (coordinates[X (i)] - coordinates[X (j)]) * myPBC.invX);
     d_1 = myPBC.Y * PLMD::GPU::pbcClamp (
-                        (coordinates[Y (j)] - coordinates[Y (i)]) * myPBC.invY);
+                        (coordinates[Y (i)] - coordinates[Y (j)]) * myPBC.invY);
     d_2 = myPBC.Z * PLMD::GPU::pbcClamp (
-                        (coordinates[Z (j)] - coordinates[Z (i)]) * myPBC.invZ);
+                        (coordinates[Z (i)] - coordinates[Z (j)]) * myPBC.invZ);
   } else {
     d_0 = coordinates[X (j)] - coordinates[X (i)];
     d_1 = coordinates[Y (j)] - coordinates[Y (i)];
