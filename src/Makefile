@@ -10,16 +10,16 @@ soext     = so
 
 OBJS:= Coordination.o CoordinationwB.o cudaHelpers.o CoordinationPair.o
 
-all: Coordination.$(soext)
+all: CudaCoordination.$(soext)
 
 %.o: %.cu cudaHelpers.cuh
 	$(NV) $(NVFLAGS) -ccbin $(compile) -o $@  $<
 
-Coordination.$(soext): $(OBJS)
+CudaCoordination.$(soext): $(OBJS)
 	$(NV) -shared $(NVLDFLAGS) $(link) -o $@ $^
 
 clean:
-	@rm -fv Coordination.$(soext) $(OBJS)
+	@rm -fv CudaCoordination.$(soext) $(OBJS)
 
 check: all
 	$(MAKE) -C regtest
