@@ -735,6 +735,7 @@ size_t CudaCoordination<calculateFloat>::doDual() {
   /**********************allocating the memory on the GPU**********************/
   cudaCoordination.resize (atomsInA);
   cudaVirial.resize (atomsInA * 9);
+  /**************************starting the calculations*************************/
   if (pbc) {
     // Only ortho as now
     auto box = getBox();
@@ -792,8 +793,158 @@ size_t CudaCoordination<calculateFloat>::doDual() {
   }
   return atomsInA;
 }
+
+template <bool usePBC, typename calculateFloat>
+__global__ void
+getCoordPair (const unsigned couples,
+              const PLMD::GPU::rationalSwitchParameters<calculateFloat>
+                  switchingParameters,
+              const PLMD::GPU::ortoPBCs<calculateFloat> myPBC,
+              const calculateFloat *coordinates,
+              const unsigned *trueIndexes,
+              calculateFloat *ncoordOut,
+              calculateFloat *devOut,
+              calculateFloat *virialOut) {
+  // blockDIm are the number of threads in your block
+  const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
+  const unsigned j = i + couples;
+  if (i >= couples) { // blocks are initializated with 'ceil (nat/threads)'
+    return;
+  }
+  // we try working with less global memory possible, so we set up a bunch of
+  // temporary variables
+  // const unsigned idx = ;
+  // const unsigned jdx = trueIndexes[j];
+
+  if (trueIndexes[i] == trueIndexes[j]) {
+    return;
+  }
+
+  // calculateFloat mycoord = 0.0;
+
+  // the previous version used static array for myVirial and d
+  // using explicit variables guarantees that this data will be stored in
+  // registers
+  calculateFloat myVirial_0 = 0.0;
+  calculateFloat myVirial_1 = 0.0;
+  calculateFloat myVirial_2 = 0.0;
+  calculateFloat myVirial_3 = 0.0;
+  calculateFloat myVirial_4 = 0.0;
+  calculateFloat myVirial_5 = 0.0;
+  calculateFloat myVirial_6 = 0.0;
+  calculateFloat myVirial_7 = 0.0;
+  calculateFloat myVirial_8 = 0.0;
+  // local calculation aid
+
+  calculateFloat d_0, d_1, d_2;
+  // calculateFloat t;
+  calculateFloat dfunc;
+  calculateFloat coord;
+  calculateFloat mydevX;
+  calculateFloat mydevY;
+  calculateFloat mydevZ;
+
+  // Safeguard
+  // if (idx == trueIndexes[j])
+  //   continue;
+  // or may be better to set up an
+  // const unsigned xyz = threadIdx.z
+  // where the third dim is 0 1 2 ^
+  // ?
+  if constexpr (usePBC) {
+    d_0 = myPBC.X * PLMD::GPU::pbcClamp (
+                        (coordinates[X (i)] - coordinates[X (j)]) * myPBC.invX);
+    d_1 = myPBC.Y * PLMD::GPU::pbcClamp (
+                        (coordinates[Y (i)] - coordinates[Y (j)]) * myPBC.invY);
+    d_2 = myPBC.Z * PLMD::GPU::pbcClamp (
+                        (coordinates[Z (i)] - coordinates[Z (j)]) * myPBC.invZ);
+  } else {
+    d_0 = coordinates[X (j)] - coordinates[X (i)];
+    d_1 = coordinates[Y (j)] - coordinates[Y (i)];
+    d_2 = coordinates[Z (j)] - coordinates[Z (i)];
+  }
+
+  dfunc = 0.;
+  // coord +=
+  ncoordOut[i] = calculateSqr (
+      d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
+
+  mydevX = dfunc * d_0;
+
+  myVirial_0 -= mydevX * d_0;
+  myVirial_1 -= mydevX * d_1;
+  myVirial_2 -= mydevX * d_2;
+
+  mydevY = dfunc * d_1;
+
+  myVirial_3 -= mydevY * d_0;
+  myVirial_4 -= mydevY * d_1;
+  myVirial_5 -= mydevY * d_2;
+
+  mydevZ = dfunc * d_2;
+
+  myVirial_6 -= mydevZ * d_0;
+  myVirial_7 -= mydevZ * d_1;
+  myVirial_8 -= mydevZ * d_2;
+
+  devOut[X (i)] = -mydevX;
+  devOut[Y (i)] = -mydevY;
+  devOut[Z (i)] = -mydevZ;
+  devOut[X (j)] = mydevX;
+  devOut[Y (j)] = mydevY;
+  devOut[Z (j)] = mydevZ;
+  // ncoordOut[i] = mycoord;
+  virialOut[couples * 0 + i] = myVirial_0;
+  virialOut[couples * 1 + i] = myVirial_1;
+  virialOut[couples * 2 + i] = myVirial_2;
+  virialOut[couples * 3 + i] = myVirial_3;
+  virialOut[couples * 4 + i] = myVirial_4;
+  virialOut[couples * 5 + i] = myVirial_5;
+  virialOut[couples * 6 + i] = myVirial_6;
+  virialOut[couples * 7 + i] = myVirial_7;
+  virialOut[couples * 8 + i] = myVirial_8;
+}
+
 template <typename calculateFloat>
-size_t CudaCoordination<calculateFloat>::doPair() {}
+size_t CudaCoordination<calculateFloat>::doPair() {
+  size_t couples = cudaPositions.size() / 6;
+  unsigned ngroups = ceil (double (couples) / maxNumThreads);
+  /**********************allocating the memory on the GPU**********************/
+  cudaCoordination.resize (couples);
+  cudaVirial.resize (couples * 9);
+  /**************************starting the calculations*************************/
+  if (pbc) {
+    // Only ortho as now
+    auto box = getBox();
+
+    myPBC.X = box (0, 0);
+    myPBC.Y = box (1, 1);
+    myPBC.Z = box (2, 2);
+    myPBC.invX = 1.0 / myPBC.X;
+    myPBC.invY = 1.0 / myPBC.Y;
+    myPBC.invZ = 1.0 / myPBC.Z;
+    getCoordPair<true><<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
+        couples,
+        switchingParameters,
+        myPBC,
+        thrust::raw_pointer_cast (cudaPositions.data()),
+        thrust::raw_pointer_cast (cudaTrueIndexes.data()),
+        thrust::raw_pointer_cast (cudaCoordination.data()),
+        thrust::raw_pointer_cast (cudaDerivatives.data()),
+        thrust::raw_pointer_cast (cudaVirial.data()));
+  } else {
+    getCoordPair<false><<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
+        couples,
+        switchingParameters,
+        myPBC,
+        thrust::raw_pointer_cast (cudaPositions.data()),
+        thrust::raw_pointer_cast (cudaTrueIndexes.data()),
+        thrust::raw_pointer_cast (cudaCoordination.data()),
+        thrust::raw_pointer_cast (cudaDerivatives.data()),
+        thrust::raw_pointer_cast (cudaVirial.data()));
+  }
+  return couples;
+}
 
 } // namespace colvar
 } // namespace PLMD
