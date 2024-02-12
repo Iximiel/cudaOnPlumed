@@ -440,9 +440,9 @@ getSelfCoord (const unsigned nat,
   calculateFloat myVirial_7 = 0.0;
   calculateFloat myVirial_8 = 0.0;
   // local calculation aid
-  const calculateFloat x = sdata[X (i)];
-  const calculateFloat y = sdata[Y (i)];
-  const calculateFloat z = sdata[Z (i)];
+  const calculateFloat x = coordinates[X (i)];
+  const calculateFloat y = coordinates[Y (i)];
+  const calculateFloat z = coordinates[Z (i)];
   calculateFloat d_0, d_1, d_2;
   calculateFloat t_0, t_1, t_2;
   calculateFloat dfunc;
@@ -571,6 +571,14 @@ getCoordDual (const unsigned natActive,
               calculateFloat *ncoordOut,
               calculateFloat *devOut,
               calculateFloat *virialOut) {
+  auto sdata = shared_memory_proxy<calculateFloat>();
+  // loading shared memory
+  for (auto k = threadIdx.x; k < natLoop; k += blockDim.x) {
+    sdata[X (k)] = coordLoop[X (k)];
+    sdata[Y (k)] = coordLoop[Y (k)];
+    sdata[Z (k)] = coordLoop[Z (k)];
+  }
+
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
   if (i >= natActive) { // blocks are initializated with 'ceil (nat/threads)'
@@ -615,13 +623,13 @@ getCoordDual (const unsigned natActive,
     // where the third dim is 0 1 2 ^
     // ?
     if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = PLMD::GPU::pbcClamp ((sdata[X (j)] - x) * myPBC.invX) * myPBC.X;
+      d_1 = PLMD::GPU::pbcClamp ((sdata[Y (j)] - y) * myPBC.invY) * myPBC.Y;
+      d_2 = PLMD::GPU::pbcClamp ((sdata[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
     } else {
-      d_0 = coordLoop[X (j)] - x;
-      d_1 = coordLoop[Y (j)] - y;
-      d_2 = coordLoop[Z (j)] - z;
+      d_0 = sdata[X (j)] - x;
+      d_1 = sdata[Y (j)] - y;
+      d_2 = sdata[Z (j)] - z;
     }
 
     dfunc = 0.;
@@ -677,6 +685,14 @@ getDerivDual (const unsigned natLoop,
               const calculateFloat *coordActive,
               const unsigned *trueIndexes,
               calculateFloat *devOut) {
+  auto sdata = shared_memory_proxy<calculateFloat>();
+  // loading shared memory
+  for (auto k = threadIdx.x; k < natLoop; k += blockDim.x) {
+    sdata[X (k)] = coordLoop[X (k)];
+    sdata[Y (k)] = coordLoop[Y (k)];
+    sdata[Z (k)] = coordLoop[Z (k)];
+  }
+
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
   if (i >= natActive) { // blocks are initializated with 'ceil (nat/threads)'
@@ -721,13 +737,13 @@ getDerivDual (const unsigned natLoop,
     // where the third dim is 0 1 2 ^
     // ?
     if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = PLMD::GPU::pbcClamp ((sdata[X (j)] - x) * myPBC.invX) * myPBC.X;
+      d_1 = PLMD::GPU::pbcClamp ((sdata[Y (j)] - y) * myPBC.invY) * myPBC.Y;
+      d_2 = PLMD::GPU::pbcClamp ((sdata[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
     } else {
-      d_0 = coordLoop[X (j)] - x;
-      d_1 = coordLoop[Y (j)] - y;
-      d_2 = coordLoop[Z (j)] - z;
+      d_0 = sdata[X (j)] - x;
+      d_1 = sdata[Y (j)] - y;
+      d_2 = sdata[Z (j)] - z;
     }
 
     dfunc = 0.;
@@ -764,7 +780,10 @@ size_t CudaCoordination<calculateFloat>::doDual() {
     myPBC.invY = 1.0 / myPBC.Y;
     myPBC.invZ = 1.0 / myPBC.Z;
 
-    getCoordDual<true><<<ngroupsA, maxNumThreads, 0, streamDerivatives>>> (
+    getCoordDual<true><<<ngroupsA,
+                         maxNumThreads,
+                         3 * atomsInB * sizeof (calculateFloat),
+                         streamDerivatives>>> (
         atomsInA,
         atomsInB,
         switchingParameters,
@@ -776,7 +795,10 @@ size_t CudaCoordination<calculateFloat>::doDual() {
         thrust::raw_pointer_cast (cudaDerivatives.data()),
         thrust::raw_pointer_cast (cudaVirial.data()));
 
-    getDerivDual<true><<<ngroupsB, maxNumThreads, 0, streamDerivatives>>> (
+    getDerivDual<true><<<ngroupsB,
+                         maxNumThreads,
+                         3 * atomsInA * sizeof (calculateFloat),
+                         streamDerivatives>>> (
         atomsInA,
         atomsInB,
         switchingParameters,
@@ -786,7 +808,10 @@ size_t CudaCoordination<calculateFloat>::doDual() {
         thrust::raw_pointer_cast (cudaTrueIndexes.data()),
         thrust::raw_pointer_cast (cudaDerivatives.data()) + 3 * atomsInA);
   } else {
-    getCoordDual<false><<<ngroupsA, maxNumThreads, 0, streamDerivatives>>> (
+    getCoordDual<false><<<ngroupsA,
+                          maxNumThreads,
+                          3 * atomsInB * sizeof (calculateFloat),
+                          streamDerivatives>>> (
         atomsInA,
         atomsInB,
         switchingParameters,
@@ -798,7 +823,10 @@ size_t CudaCoordination<calculateFloat>::doDual() {
         thrust::raw_pointer_cast (cudaDerivatives.data()),
         thrust::raw_pointer_cast (cudaVirial.data()));
 
-    getDerivDual<false><<<ngroupsB, maxNumThreads, 0, streamDerivatives>>> (
+    getDerivDual<false><<<ngroupsB,
+                          maxNumThreads,
+                          3 * atomsInA * sizeof (calculateFloat),
+                          streamDerivatives>>> (
         atomsInA,
         atomsInB,
         switchingParameters,
