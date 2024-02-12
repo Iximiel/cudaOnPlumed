@@ -416,6 +416,7 @@ getSelfCoord (const unsigned nat,
   }
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
+  __syncthreads();
   if (i >= nat) { // blocks are initializated with 'ceil (nat/threads)'
     return;
   }
@@ -581,6 +582,7 @@ getCoordDual (const unsigned natActive,
 
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
+  __syncthreads();
   if (i >= natActive) { // blocks are initializated with 'ceil (nat/threads)'
     return;
   }
@@ -695,6 +697,7 @@ getDerivDual (const unsigned natLoop,
 
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
+  __syncthreads();
   if (i >= natActive) { // blocks are initializated with 'ceil (nat/threads)'
     return;
   }
