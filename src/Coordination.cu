@@ -389,6 +389,13 @@ void CudaCoordination<calculateFloat>::calculate() {
 #define Y(I) 3 * I + 1
 #define Z(I) 3 * I + 2
 
+// this make possible to use shared memory within a templated kernel
+template <typename T> __device__ T *shared_memory_proxy() {
+  // do we need an __align__() here?
+  extern __shared__ unsigned char memory[];
+  return reinterpret_cast<T *> (memory);
+}
+
 template <bool usePBC, typename calculateFloat>
 __global__ void
 getSelfCoord (const unsigned nat,
@@ -400,6 +407,13 @@ getSelfCoord (const unsigned nat,
               calculateFloat *ncoordOut,
               calculateFloat *devOut,
               calculateFloat *virialOut) {
+  auto sdata = shared_memory_proxy<calculateFloat>();
+  // loading shared memory
+  for (auto k = threadIdx.x; k < nat; k += blockDim.x) {
+    sdata[X (k)] = coordinates[X (k)];
+    sdata[Y (k)] = coordinates[Y (k)];
+    sdata[Z (k)] = coordinates[Z (k)];
+  }
   // blockDIm are the number of threads in your block
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
   if (i >= nat) { // blocks are initializated with 'ceil (nat/threads)'
@@ -426,9 +440,9 @@ getSelfCoord (const unsigned nat,
   calculateFloat myVirial_7 = 0.0;
   calculateFloat myVirial_8 = 0.0;
   // local calculation aid
-  const calculateFloat x = coordinates[X (i)];
-  const calculateFloat y = coordinates[Y (i)];
-  const calculateFloat z = coordinates[Z (i)];
+  const calculateFloat x = sdata[X (i)];
+  const calculateFloat y = sdata[Y (i)];
+  const calculateFloat z = sdata[Z (i)];
   calculateFloat d_0, d_1, d_2;
   calculateFloat t_0, t_1, t_2;
   calculateFloat dfunc;
@@ -444,16 +458,13 @@ getSelfCoord (const unsigned nat,
     // where the third dim is 0 1 2 ^
     // ?
     if constexpr (usePBC) {
-      d_0 =
-          PLMD::GPU::pbcClamp ((coordinates[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 =
-          PLMD::GPU::pbcClamp ((coordinates[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 =
-          PLMD::GPU::pbcClamp ((coordinates[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = PLMD::GPU::pbcClamp ((sdata[X (j)] - x) * myPBC.invX) * myPBC.X;
+      d_1 = PLMD::GPU::pbcClamp ((sdata[Y (j)] - y) * myPBC.invY) * myPBC.Y;
+      d_2 = PLMD::GPU::pbcClamp ((sdata[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
     } else {
-      d_0 = coordinates[X (j)] - x;
-      d_1 = coordinates[Y (j)] - y;
-      d_2 = coordinates[Z (j)] - z;
+      d_0 = sdata[X (j)] - x;
+      d_1 = sdata[Y (j)] - y;
+      d_2 = sdata[Z (j)] - z;
     }
 
     dfunc = 0.;
@@ -518,7 +529,10 @@ size_t CudaCoordination<calculateFloat>::doSelf() {
     myPBC.invY = 1.0 / myPBC.Y;
     myPBC.invZ = 1.0 / myPBC.Z;
 
-    getSelfCoord<true><<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
+    getSelfCoord<true><<<ngroups,
+                         maxNumThreads,
+                         3 * nat * sizeof (calculateFloat),
+                         streamDerivatives>>> (
         nat,
         switchingParameters,
         myPBC,
@@ -528,7 +542,10 @@ size_t CudaCoordination<calculateFloat>::doSelf() {
         thrust::raw_pointer_cast (cudaDerivatives.data()),
         thrust::raw_pointer_cast (cudaVirial.data()));
   } else {
-    getSelfCoord<false><<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
+    getSelfCoord<false><<<ngroups,
+                          maxNumThreads,
+                          3 * nat * sizeof (calculateFloat),
+                          streamDerivatives>>> (
         nat,
         switchingParameters,
         myPBC,
