@@ -511,7 +511,7 @@ getCoordDual (const unsigned natActive,
     }
 
     dfunc = 0.;
-    mycoord = calculateSqr (
+    mycoord += calculateSqr (
         d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
 
     t = dfunc * d_0;
