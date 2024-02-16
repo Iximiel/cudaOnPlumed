@@ -47,22 +47,31 @@ template <typename calculateFloat> struct rationalSwitchParameters {
 };
 
 template <typename calculateFloat> struct ortoPBCs {
-  calculateFloat invX = 1.0;
-  calculateFloat invY = 1.0;
-  calculateFloat invZ = 1.0;
-  calculateFloat X = 1.0;
-  calculateFloat Y = 1.0;
-  calculateFloat Z = 1.0;
+  template <typename T> struct invData {
+    T val = 1.0;
+    T inv = 1.0;
+    // this makes the `X = x;` work like "X.val=x;X.inv=1/x;"
+    // and the compiler will do some inline magic for you
+    invData (T const v) : val{v}, inv{T (1.0) / v} {}
+    invData &operator= (T const v) {
+      val = v;
+      inv = T (1.0) / v;
+      return *this;
+    }
+  };
+  invData<calculateFloat> X{1.0};
+  invData<calculateFloat> Y{1.0};
+  invData<calculateFloat> Z{1.0};
 };
 
 template <typename calculateFloat>
-__device__ calculateFloat pbcClamp(calculateFloat x) {
+__device__ calculateFloat pbcClamp (calculateFloat x) {
   return 0.0;
 }
 
-template <> __device__ __forceinline__ double pbcClamp<double>(double x) {
+template <> __device__ __forceinline__ double pbcClamp<double> (double x) {
   // convert a double to a signed int in round-to-nearest-even mode.
-  return __double2int_rn(x) - x;
+  return __double2int_rn (x) - x;
   // return x - floor(x+0.5);
   // Round argument x to an integer value in single precision floating-point
   // format.
@@ -70,16 +79,16 @@ template <> __device__ __forceinline__ double pbcClamp<double>(double x) {
   // return nearbyint(x) - x;
 }
 
-template <> __device__ __forceinline__ float pbcClamp<float>(float x) {
+template <> __device__ __forceinline__ float pbcClamp<float> (float x) {
   // convert a double to a signed int in round-to-nearest-even mode.
-  return __float2int_rn(x) - x;
+  return __float2int_rn (x) - x;
   // return x - floorf(x+0.5f);
   // return nearbyintf(x) - x;
 }
 
 template <typename calculateFloat>
-__device__ __forceinline__ calculateFloat pcuda_fastpow(calculateFloat base,
-                                                        int expo) {
+__device__ __forceinline__ calculateFloat pcuda_fastpow (calculateFloat base,
+                                                         int expo) {
   if (expo < 0) {
     expo = -expo;
     base = 1.0 / base;
@@ -107,12 +116,14 @@ template <> constexpr __device__ double pcuda_eps<double>() {
 
 template <typename calculateFloat>
 __device__ __forceinline__ calculateFloat
-pcuda_Rational(const calculateFloat rdist, const int NN, const int MM,
-               calculateFloat &dfunc) {
+pcuda_Rational (const calculateFloat rdist,
+                const int NN,
+                const int MM,
+                calculateFloat &dfunc) {
   calculateFloat result;
   if (2 * NN == MM) {
     // if 2*N==M, then (1.0-rdist^N)/(1.0-rdist^M) = 1.0/(1.0+rdist^N)
-    calculateFloat rNdist = pcuda_fastpow(rdist, NN - 1);
+    calculateFloat rNdist = pcuda_fastpow (rdist, NN - 1);
     result = 1.0 / (1 + rNdist * rdist);
     dfunc = -NN * rNdist * result * result;
   } else {
@@ -122,8 +133,8 @@ pcuda_Rational(const calculateFloat rdist, const int NN, const int MM,
       result = NN / MM;
       dfunc = 0.5 * NN * (NN - MM) / MM;
     } else {
-      calculateFloat rNdist = pcuda_fastpow(rdist, NN - 1);
-      calculateFloat rMdist = pcuda_fastpow(rdist, MM - 1);
+      calculateFloat rNdist = pcuda_fastpow (rdist, NN - 1);
+      calculateFloat rMdist = pcuda_fastpow (rdist, MM - 1);
       calculateFloat num = 1. - rNdist * rdist;
       calculateFloat iden = 1.0 / (1.0 - rMdist * rdist);
       result = num * iden;
@@ -134,29 +145,31 @@ pcuda_Rational(const calculateFloat rdist, const int NN, const int MM,
 }
 
 template <typename calculateFloat>
-__global__ void getpcuda_Rational(const calculateFloat *rdists, const int NN,
-                                  const int MM, calculateFloat *dfunc,
-                                  calculateFloat *res) {
+__global__ void getpcuda_Rational (const calculateFloat *rdists,
+                                   const int NN,
+                                   const int MM,
+                                   calculateFloat *dfunc,
+                                   calculateFloat *res) {
   const int i = threadIdx.x + blockIdx.x * blockDim.x;
   if (rdists[i] <= 0.) {
     res[i] = 1.;
     dfunc[i] = 0.0;
   } else
-    res[i] = pcuda_Rational(rdists[i], NN, MM, dfunc[i]);
+    res[i] = pcuda_Rational (rdists[i], NN, MM, dfunc[i]);
   // printf("stretch: %i: %f -> %f\n",i,rdists[i],res[i]);
 }
 
 template <typename calculateFloat>
-__device__ __forceinline__ calculateFloat
-calculateSqr(const calculateFloat distancesq,
-             const rationalSwitchParameters<calculateFloat> switchingParameters,
-             calculateFloat &dfunc) {
+__device__ __forceinline__ calculateFloat calculateSqr (
+    const calculateFloat distancesq,
+    const rationalSwitchParameters<calculateFloat> switchingParameters,
+    calculateFloat &dfunc) {
   calculateFloat result = 0.0;
   dfunc = 0.0;
   if (distancesq < switchingParameters.dmaxSQ) {
     const calculateFloat rdist_2 = distancesq * switchingParameters.invr0_2;
-    result = pcuda_Rational(rdist_2, switchingParameters.nn / 2,
-                            switchingParameters.mm / 2, dfunc);
+    result = pcuda_Rational (
+        rdist_2, switchingParameters.nn / 2, switchingParameters.mm / 2, dfunc);
     // chain rule:
     dfunc *= 2 * switchingParameters.invr0_2;
     // cu_stretch:

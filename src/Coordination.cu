@@ -334,12 +334,12 @@ getSelfCoord (const unsigned nat,
     // where the third dim is 0 1 2 ^
     // ?
     if constexpr (usePBC) {
-      d_0 =
-          PLMD::GPU::pbcClamp ((coordinates[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 =
-          PLMD::GPU::pbcClamp ((coordinates[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 =
-          PLMD::GPU::pbcClamp ((coordinates[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = PLMD::GPU::pbcClamp ((coordinates[X (j)] - x) * myPBC.X.inv) *
+            myPBC.X.val;
+      d_1 = PLMD::GPU::pbcClamp ((coordinates[Y (j)] - y) * myPBC.Y.inv) *
+            myPBC.Y.val;
+      d_2 = PLMD::GPU::pbcClamp ((coordinates[Z (j)] - z) * myPBC.Z.inv) *
+            myPBC.Z.val;
     } else {
       d_0 = coordinates[X (j)] - x;
       d_1 = coordinates[Y (j)] - y;
@@ -404,9 +404,6 @@ size_t CudaCoordination<calculateFloat>::doSelf() {
     myPBC.X = box (0, 0);
     myPBC.Y = box (1, 1);
     myPBC.Z = box (2, 2);
-    myPBC.invX = 1.0 / myPBC.X;
-    myPBC.invY = 1.0 / myPBC.Y;
-    myPBC.invZ = 1.0 / myPBC.Z;
 
     getSelfCoord<true><<<ngroups,
                          maxNumThreads,
@@ -501,9 +498,12 @@ getCoordDual (const unsigned natActive,
     // where the third dim is 0 1 2 ^
     // ?
     if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.X.inv) *
+            myPBC.X.val;
+      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.Y.inv) *
+            myPBC.Y.val;
+      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.Z.inv) *
+            myPBC.Z.val;
     } else {
       d_0 = coordLoop[X (j)] - x;
       d_1 = coordLoop[Y (j)] - y;
@@ -614,9 +614,12 @@ getDerivDual (const unsigned natLoop,
     // where the third dim is 0 1 2 ^
     // ?
     if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.invX) * myPBC.X;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.invY) * myPBC.Y;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.invZ) * myPBC.Z;
+      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.X.inv) *
+            myPBC.X.val;
+      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.Y.inv) *
+            myPBC.Y.val;
+      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.Z.inv) *
+            myPBC.Z.val;
     } else {
       d_0 = coordLoop[X (j)] - x;
       d_1 = coordLoop[Y (j)] - y;
@@ -653,9 +656,6 @@ size_t CudaCoordination<calculateFloat>::doDual() {
     myPBC.X = box (0, 0);
     myPBC.Y = box (1, 1);
     myPBC.Z = box (2, 2);
-    myPBC.invX = 1.0 / myPBC.X;
-    myPBC.invY = 1.0 / myPBC.Y;
-    myPBC.invZ = 1.0 / myPBC.Z;
 
     getCoordDual<true><<<ngroupsA,
                          maxNumThreads,
@@ -774,12 +774,15 @@ getCoordPair (const unsigned couples,
   // where the third dim is 0 1 2 ^
   // ?
   if constexpr (usePBC) {
-    d_0 = myPBC.X * PLMD::GPU::pbcClamp (
-                        (coordinates[X (i)] - coordinates[X (j)]) * myPBC.invX);
-    d_1 = myPBC.Y * PLMD::GPU::pbcClamp (
-                        (coordinates[Y (i)] - coordinates[Y (j)]) * myPBC.invY);
-    d_2 = myPBC.Z * PLMD::GPU::pbcClamp (
-                        (coordinates[Z (i)] - coordinates[Z (j)]) * myPBC.invZ);
+    d_0 = myPBC.X.val *
+          PLMD::GPU::pbcClamp ((coordinates[X (i)] - coordinates[X (j)]) *
+                               myPBC.X.inv);
+    d_1 = myPBC.Y.val *
+          PLMD::GPU::pbcClamp ((coordinates[Y (i)] - coordinates[Y (j)]) *
+                               myPBC.Y.inv);
+    d_2 = myPBC.Z.val *
+          PLMD::GPU::pbcClamp ((coordinates[Z (i)] - coordinates[Z (j)]) *
+                               myPBC.Z.inv);
   } else {
     d_0 = coordinates[X (j)] - coordinates[X (i)];
     d_1 = coordinates[Y (j)] - coordinates[Y (i)];
@@ -842,9 +845,7 @@ size_t CudaCoordination<calculateFloat>::doPair() {
     myPBC.X = box (0, 0);
     myPBC.Y = box (1, 1);
     myPBC.Z = box (2, 2);
-    myPBC.invX = 1.0 / myPBC.X;
-    myPBC.invY = 1.0 / myPBC.Y;
-    myPBC.invZ = 1.0 / myPBC.Z;
+
     getCoordPair<true><<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
         couples,
         switchingParameters,
