@@ -19,208 +19,388 @@
 #ifndef __PLUMED_cuda_helpers_cuh
 #define __PLUMED_cuda_helpers_cuh
 
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
+#include "plumed/tools/Tensor.h"
+#include "plumed/tools/Vector.h"
+#include <thrust/device_vector.h>
 #include <vector>
-
 namespace CUDAHELPERS {
 
-template <class T> __device__ constexpr const T &mymin(const T &a, const T &b) {
-  return (b < a) ? b : a;
-}
-
-// this make possible to use shared memorywithin a templated kernel
-template <typename T> __device__ T *shared_memory_proxy() {
-  // do we need an __align__() here?
-  extern __shared__ unsigned char memory[];
-  return reinterpret_cast<T *>(memory);
-}
-
-// onlymoveable helper
-template <typename T> class memoryHolder {
-  T *pointer_{nullptr};
-  // the dimension in memory
-  unsigned dim_{0};
-  // the used part of the array
-  unsigned usedim_{0};
-
-public:
-  memoryHolder() {}
-  memoryHolder(memoryHolder &other) = delete;
-  memoryHolder(memoryHolder &&other)
-      : pointer_(other.pointer_), dim_(other.dim_), usedim_(other.usedim_) {
-    other.pointer_ = nullptr;
-  }
-  memoryHolder(const unsigned newDim) : dim_(newDim), usedim_(newDim) {
-    cudaMalloc(&pointer_, dim_ * sizeof(T));
-  }
-  memoryHolder &operator=(memoryHolder &&other) {
-    pointer_ = other.pointer_;
-    dim_ = other.dim_;
-    usedim_ = other.usedim_;
-    other.pointer_ = nullptr;
-    other.dim_ = 0;
-    other.usedim_ = 0;
-    return *this;
-  }
-
-  ~memoryHolder() { cudaFree(pointer_); }
-  T *pointer() { return pointer_; }
-  unsigned size() const { return usedim_; }
-  unsigned reserved() const { return dim_; }
-  void /*CUresult*/ resize(const unsigned newDim, bool keepData = false) {
-
-    if (newDim > dim_) {
-      T *new_ptr = nullptr;
-      cudaMalloc(&new_ptr, newDim * sizeof(T));
-      if (keepData && pointer_) {
-        // copy the old data into the new pointer
-        cudaMemcpy(new_ptr, pointer_, usedim_ * sizeof(T),
-                   cudaMemcpyDeviceToDevice);
-      }
-      cudaFree(pointer_);
-      pointer_ = new_ptr;
-      dim_ = newDim;
-    }
-    usedim_ = newDim;
-  }
-  void /*CUresult*/ reserve(const unsigned newDim, bool keepData = false) {
-    if (newDim > dim_) {
-      T *new_ptr = nullptr;
-      cudaMalloc(&new_ptr, newDim * sizeof(T));
-      if (keepData && pointer_) {
-        // copy the old data into the new pointer
-        cudaMemcpy(new_ptr, pointer_, usedim_ * sizeof(T));
-      }
-      cudaFree(pointer_);
-      pointer_ = new_ptr;
-      dim_ = newDim;
-    }
-  }
-
-  void /*CUresult*/ copyToCuda(T *cpupointer) {
-    cudaMemcpy(pointer_, cpupointer, usedim_ * sizeof(T),
-               cudaMemcpyHostToDevice);
-  }
-
-  void /*CUresult*/ copyToCuda(T *cpupointer, cudaStream_t stream) {
-    cudaMemcpyAsync(pointer_, cpupointer, usedim_ * sizeof(T),
-                    cudaMemcpyHostToDevice, stream);
-  }
-
-  void /*CUresult*/ copyFromCuda(T *cpupointer) {
-    cudaMemcpy(cpupointer, pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-  }
-
-  void /*CUresult*/ copyFromCuda(T *cpupointer, cudaStream_t stream) {
-    cudaMemcpyAsync(cpupointer, pointer_, usedim_ * sizeof(T),
-                    cudaMemcpyDeviceToHost, stream);
-  }
-
-  //*conversions*/
-  // using vector to avoid memory leaks
-  template <typename Y> void /*CUresult*/ copyToCuda(Y *cpupointer) {
-    std::vector<T> tempMemory(usedim_);
-    for (auto i = 0u; i < usedim_; ++i)
-      tempMemory[i] = cpupointer[i];
-
-    cudaMemcpy(pointer_, tempMemory.data(), usedim_ * sizeof(T),
-               cudaMemcpyHostToDevice);
-  }
-
-  template <typename Y>
-  void /*CUresult*/ copyToCuda(Y *cpupointer, cudaStream_t stream) {
-    std::vector<T> tempMemory(usedim_);
-    for (auto i = 0u; i < usedim_; ++i)
-      tempMemory[i] = cpupointer[i];
-
-    cudaMemcpyAsync(pointer_, tempMemory.data(), usedim_ * sizeof(T),
-                    cudaMemcpyHostToDevice, stream);
-  }
-
-  template <typename Y> void /*CUresult*/ copyFromCuda(Y *cpupointer) {
-    std::vector<T> tempMemory(usedim_);
-    cudaMemcpy(tempMemory.data(), pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-    for (auto i = 0u; i < usedim_; ++i)
-      cpupointer[i] = tempMemory[i];
-  }
-
-  template <typename Y>
-  void /*CUresult*/ copyFromCuda(Y *cpupointer, cudaStream_t) {
-    std::vector<T> tempMemory(usedim_);
-    cudaMemcpy(tempMemory.data(), pointer_, usedim_ * sizeof(T),
-               cudaMemcpyDeviceToHost);
-    // not async because there is a conversion on the cpu pointer
-    for (auto i = 0u; i < usedim_; ++i)
-      cpupointer[i] = tempMemory[i];
-  }
-  /**/
-
-  void swap(memoryHolder &other) {
-    std::swap(this->pointer_, other.pointer_);
-    std::swap(this->dim_, other.dim_);
-    std::swap(this->usedim_, other.usedim_);
+/// @brief a interface to help in the data I/O to the GPU
+///
+/// It contains specialized constructors for using the correct size with
+/// PLMD::VectorGeneric or PLMD::TensorGeneric along with a std::vector
+/// constructor to generate the corret data structure given the size of it.
+///
+/// The functions and types that use DataInterface assume that ALL the data
+/// contained within the passed object will be used
+struct DataInterface {
+  // NOT owning pointer
+  double *ptr = nullptr;
+  size_t size = 0;
+  DataInterface() = delete;
+  template <unsigned n>
+  // VectorGeneric is a "memory map" on an n linear array
+  // &vg[0] gets the pointer to the first double in memory
+  // C++ vectors align memory so we can safely use the vector variant of
+  // DataInterface
+  explicit DataInterface (PLMD::VectorGeneric<n> &vg)
+      : ptr (&vg[0]), size (n) {}
+  // TensorGeneric is a "memory map" on an n*m linear array
+  // &tg[0][0] gets  the pointer to the first double in memory
+  // C++ vectors align memory so we can safely use the vector variant of
+  // DataInterface
+  template <unsigned n, unsigned m>
+  explicit DataInterface (PLMD::TensorGeneric<n, m> &tg)
+      : ptr (&tg[0][0]), size (n * m) {}
+  template <typename T>
+  explicit DataInterface (std::vector<T> &vt) : DataInterface (vt[0]) {
+    size *= vt.size();
   }
 };
 
-/// @brief This is the "body" of th ereduction algorithm: you should prepare the
-/// shared memory and the plug it in this, due to the templated numthreads most
-/// of the if are done at compile time
-template <unsigned numThreads, typename T>
-__device__ void reductor(volatile T *sdata, T *outputArray,
-                         const unsigned int where) {
-  // this is an unrolled loop
-  const unsigned int tid = threadIdx.x;
-  if (numThreads >= 1024) { // compile time
-    if (tid < 512)
-      sdata[tid] += sdata[tid + 512];
-    __syncthreads();
-  }
-  if (numThreads >= 512) { // compile time
-    if (tid < 256)
-      sdata[tid] += sdata[tid + 256];
-    __syncthreads();
-  }
-  if (numThreads >= 256) { // compile time
-    if (tid < 128)
-      sdata[tid] += sdata[tid + 128];
-    __syncthreads();
-  }
-  if (numThreads >= 128) { // compile time
-    if (tid < 64)
-      sdata[tid] += sdata[tid + 64];
-    __syncthreads();
-  }
-  // a warp is composed by 32 threads that executes instructions syncrhonized,
-  // so no  need to use __syncthreads() for the last iterations;
-  if (tid < mymin(32u, numThreads / 2)) {
-    // warpReduce<numThreads>(sdata, tid);
-    if (numThreads >= 64) { // compile time
-      sdata[tid] += sdata[tid + 32];
-    }
-    if (numThreads >= 32) { // compile time
-      sdata[tid] += sdata[tid + 16];
-    }
-    if (numThreads >= 16) { // compile time
-      sdata[tid] += sdata[tid + 8];
-    }
-    if (numThreads >= 8) { // compile time
-      sdata[tid] += sdata[tid + 4];
-    }
-    if (numThreads >= 4) { // compile time
-      sdata[tid] += sdata[tid + 2];
-    }
-    if (numThreads >= 2) { // compile time
-      sdata[tid] += sdata[tid + 1];
-    }
-  }
-  // write result for this block to global memory
-  if (tid == 0) {
-    outputArray[where] = sdata[0];
+/// @brief the specialized function for getting double precision data from the
+/// gpu to a PLMD container
+inline void plmdDataFromGPU (thrust::device_vector<double> &dvmem,
+                             DataInterface data) {
+  cudaMemcpy (data.ptr,
+              thrust::raw_pointer_cast (dvmem.data()),
+              data.size * sizeof (double),
+              cudaMemcpyDeviceToHost);
+}
+
+/// @brief the specialized asyncronous function for getting double precision
+/// data from the gpu to a PLMD container
+inline void plmdDataFromGPU (thrust::device_vector<double> &dvmem,
+                             DataInterface data,
+                             cudaStream_t stream) {
+  cudaMemcpyAsync (data.ptr,
+                   thrust::raw_pointer_cast (dvmem.data()),
+                   data.size * sizeof (double),
+                   cudaMemcpyDeviceToHost,
+                   stream);
+}
+
+/// @brief the specialized function for putting double precision
+/// data from a PLMD container to the gpu
+inline void plmdDataToGPU (thrust::device_vector<double> &dvmem,
+                           DataInterface data) {
+  dvmem.resize (data.size);
+  cudaMemcpy (thrust::raw_pointer_cast (dvmem.data()),
+              data.ptr,
+              data.size * sizeof (double),
+              cudaMemcpyHostToDevice);
+}
+
+/// @brief the specialized asyncronous function for putting double precision
+/// data from a PLMD container to the gpu
+inline void plmdDataToGPU (thrust::device_vector<double> &dvmem,
+                           DataInterface data,
+                           cudaStream_t stream) {
+  dvmem.resize (data.size);
+  cudaMemcpyAsync (thrust::raw_pointer_cast (dvmem.data()),
+                   data.ptr,
+                   data.size * sizeof (double),
+                   cudaMemcpyHostToDevice,
+                   stream);
+}
+
+/// @brief the specialized function for getting single precision data from the
+/// gpu to a PLMD container
+/// @param dvmem the cuda interface to the data on the device
+/// @param data the interface to the plumed-type of data
+/// @param -ignored-
+///
+/// FAQ:why there is only a non async version?
+/// the `for` loop used to convert float to double may start before the end of
+/// async data transfer, so is safer to use the non async version, the stream
+/// paraemter is ignored so that there is non need to write extra logic in the
+/// user function tha may call the templated double version
+inline void plmdDataFromGPU (thrust::device_vector<float> &dvmem,
+                             DataInterface data,
+                             cudaStream_t = 0) {
+  std::vector<float> tempMemory (data.size);
+  cudaMemcpy (tempMemory.data(),
+              thrust::raw_pointer_cast (dvmem.data()),
+              data.size * sizeof (float),
+              cudaMemcpyDeviceToHost);
+  for (auto i = 0u; i < data.size; ++i) {
+    data.ptr[i] = tempMemory[i];
   }
 }
 
+// since the for loop is BEFORE the memcpy I can safely distinguish the async
+// case from the non async one
+
+/// @brief the specialized function for putting double precision
+/// data from a PLMD container to the gpu
+inline void plmdDataToGPU (thrust::device_vector<float> &dvmem,
+                           DataInterface data) {
+  dvmem.resize (data.size);
+  std::vector<float> tempMemory (data.size);
+  for (auto i = 0u; i < data.size; ++i) {
+    tempMemory[i] = data.ptr[i];
+  }
+  cudaMemcpy (thrust::raw_pointer_cast (dvmem.data()),
+              tempMemory.data(),
+              data.size * sizeof (float),
+              cudaMemcpyHostToDevice);
+}
+
+/// @brief the specialized asyncronous function for putting double precision
+/// data from a PLMD container to the gpu
+inline void plmdDataToGPU (thrust::device_vector<float> &dvmem,
+                           DataInterface data,
+                           cudaStream_t stream) {
+  dvmem.resize (data.size);
+  std::vector<float> tempMemory (data.size);
+  for (auto i = 0u; i < data.size; ++i) {
+    tempMemory[i] = data.ptr[i];
+  }
+  cudaMemcpyAsync (thrust::raw_pointer_cast (dvmem.data()),
+                   tempMemory.data(),
+                   data.size * sizeof (float),
+                   cudaMemcpyHostToDevice,
+                   stream);
+}
+
+// the explicit constructors of DataInterface create the need for a wrapper
+/// @brief copies data to the GPU, using thrust::device_vector as interface
+///
+/// if you are transferring data from/to a 'standard' vector, consider using
+/// thrust::host_vector<T> and the thrust syntax (`deviceV=hostV;` for moving to
+/// the device or `hostV=`deviceV;` for moving from the device)
+template <typename T, typename Y>
+inline void plmdDataToGPU (thrust::device_vector<T> &dvmem, Y &data) {
+  plmdDataToGPU (dvmem, DataInterface (data));
+}
+
+/// @brief async version of plmdDataToGPU
+///
+/// if you are transferring data from/to a 'standard' vector, consider using
+/// thrust::host_vector<T> and the thrust syntax (`deviceV=hostV;` for moving to
+/// the device or `hostV=`deviceV;` for moving from the device)
+template <typename T, typename Y>
+inline void
+plmdDataToGPU (thrust::device_vector<T> &dvmem, Y &data, cudaStream_t stream) {
+  plmdDataToGPU (dvmem, DataInterface (data), stream);
+}
+
+/// @brief copies data from the GPU, using thrust::device_vector as interface
+///
+/// if you are transferring data from/to a 'standard' vector, consider using
+/// thrust::host_vector<T> and the thrust syntax (`deviceV=hostV;` for moving to
+/// the device or `hostV=`deviceV;` for moving from the device)
+template <typename T, typename Y>
+inline void plmdDataFromGPU (thrust::device_vector<T> &dvmem, Y &data) {
+  plmdDataFromGPU (dvmem, DataInterface (data));
+}
+
+/// @brief async version of plmdDataFromGPU
+///
+/// if you are transferring data from/to a 'standard' ( with a standar type,
+/// like a int) vector, consider using thrust::host_vector<T> and the thrust
+/// syntax (`deviceV=hostV;` for moving to the device or `hostV=`deviceV;` for
+/// moving from the device)
+template <typename T, typename Y>
+inline void plmdDataFromGPU (thrust::device_vector<T> &dvmem,
+                             Y &data,
+                             cudaStream_t stream) {
+  plmdDataFromGPU (dvmem, DataInterface (data), stream);
+}
+
+/// We'll find the ideal number of blocks using the Brent's theorem
+size_t idealGroups (const size_t numberOfElements, const size_t runningThreads);
+
+size_t threadsPerBlock (const unsigned N, const unsigned maxNumThreads);
+
+/**********************************REDUCTIONS**********************************/
+template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void
+reduction1DKernel (int num_valid,        // number if elements to be reduced
+                   calculateFloat *d_in, // Tile of input
+                   calculateFloat *d_out // Tile aggregate
+) {
+  // Specialize BlockReduce type for our thread block
+  using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+  const int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  // Per-thread tile data
+  calculateFloat data[ITEMS_PER_THREAD];
+  cub::LoadDirectBlocked (data_id, d_in, data, num_valid, calculateFloat (0.0));
+  // Compute sum
+  calculateFloat aggregate = BlockReduceT (temp_storage).Sum (data);
+  if (threadIdx.x == 0) {
+    d_out[blockIdx.x] = aggregate;
+  }
+}
+
+// the order of the template arguments is not standard: in this way T is deduced
+// and the user can simply specify DATAPERTHREAD
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void doReduction1D_t (T *inputArray,
+                      T *outputArray,
+                      const unsigned int len,
+                      const unsigned blocks,
+                      const unsigned nthreads) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reduction1DKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof (T)>>> (
+              len, inputArray, outputArray);
+    } else {
+      doReduction1D_t<DATAPERTHREAD, T, THREADS / 2> (
+          inputArray, outputArray, len, blocks, nthreads);
+    }
+  } else {
+    plumed_merror (
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void doReduction1D_t (T *inputArray,
+                      T *outputArray,
+                      const unsigned int len,
+                      const unsigned blocks,
+                      const unsigned nthreads,
+                      cudaStream_t stream) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reduction1DKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof (T), stream>>> (
+              len, inputArray, outputArray);
+    } else {
+      doReduction1D_t<DATAPERTHREAD, T, THREADS / 2> (
+          inputArray, outputArray, len, blocks, nthreads, stream);
+    }
+  } else {
+    plumed_merror (
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+template <unsigned DATAPERTHREAD, typename T>
+void doReduction1D (T *inputArray,
+                    T *outputArray,
+                    const size_t len,
+                    const unsigned blocks,
+                    const size_t nthreads) {
+
+  doReduction1D_t<DATAPERTHREAD> (
+      inputArray, outputArray, len, blocks, nthreads);
+}
+
+template <unsigned DATAPERTHREAD, typename T>
+void doReduction1D (T *inputArray,
+                    T *outputArray,
+                    const size_t len,
+                    const unsigned blocks,
+                    const size_t nthreads,
+                    cudaStream_t stream) {
+
+  doReduction1D_t<DATAPERTHREAD> (
+      inputArray, outputArray, len, blocks, nthreads, stream);
+}
+
+template <typename calculateFloat, int BLOCK_THREADS, int ITEMS_PER_THREAD>
+__global__ void
+reductionNDKernel (int num_valid,        // number if elements to be reduced
+                   calculateFloat *d_in, // Tile of input
+                   calculateFloat *d_out // Tile aggregate
+) {
+  // Specialize BlockReduce type for our thread block
+  using BlockReduceT = cub::BlockReduce<calculateFloat, BLOCK_THREADS>;
+  // Shared memory
+  __shared__ typename BlockReduceT::TempStorage temp_storage;
+  const int data_id = threadIdx.x + blockIdx.x * blockDim.x;
+  calculateFloat data[ITEMS_PER_THREAD];
+  cub::LoadDirectBlocked (data_id,
+                          d_in + blockIdx.y * num_valid,
+                          data,
+                          num_valid,
+                          calculateFloat (0.0));
+  // Compute sum
+  calculateFloat aggregate = BlockReduceT (temp_storage).Sum (data);
+  if (threadIdx.x == 0) {
+    d_out[blockIdx.x + blockIdx.y * gridDim.x] = aggregate;
+  }
+}
+
+// the order of the template arguments is not standard: in this way T is deduced
+// and the user can simply specify DATAPERTHREAD
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void doReductionND_t (T *inputArray,
+                      T *outputArray,
+                      const unsigned int len,
+                      const dim3 blocks,
+                      const unsigned nthreads) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reductionNDKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof (T)>>> (
+              len, inputArray, outputArray);
+    } else {
+      doReductionND_t<DATAPERTHREAD, T, THREADS / 2> (
+          inputArray, outputArray, len, blocks, nthreads);
+    }
+  } else {
+    plumed_merror (
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+template <unsigned DATAPERTHREAD, typename T, unsigned THREADS = 1024>
+void doReductionND_t (T *inputArray,
+                      T *outputArray,
+                      const unsigned int len,
+                      const dim3 blocks,
+                      const unsigned nthreads,
+                      cudaStream_t stream) {
+  if constexpr (THREADS > 16) {
+    // by using this "if constexpr" I do not need to add a specialized
+    // declaration to end the loop
+    if (nthreads == THREADS) {
+      reductionNDKernel<T, THREADS, DATAPERTHREAD>
+          <<<blocks, THREADS, THREADS * sizeof (T), stream>>> (
+              len, inputArray, outputArray);
+    } else {
+      doReductionND_t<DATAPERTHREAD, T, THREADS / 2> (
+          inputArray, outputArray, len, blocks, nthreads, stream);
+    }
+  } else {
+    plumed_merror (
+        "Reduction can be called only with 512, 256, 128, 64 or 32 threads.");
+  }
+}
+
+template <unsigned DATAPERTHREAD, typename T>
+void doReductionND (T *inputArray,
+                    T *outputArray,
+                    const unsigned int len,
+                    const dim3 blocks,
+                    const unsigned nthreads) {
+
+  doReductionND_t<DATAPERTHREAD> (
+      inputArray, outputArray, len, blocks, nthreads);
+}
+
+template <unsigned DATAPERTHREAD, typename T>
+void doReductionND (T *inputArray,
+                    T *outputArray,
+                    const unsigned int len,
+                    const dim3 blocks,
+                    const unsigned nthreads,
+                    cudaStream_t stream) {
+
+  doReductionND_t<DATAPERTHREAD> (
+      inputArray, outputArray, len, blocks, nthreads, stream);
+}
 } // namespace CUDAHELPERS
 #endif //__PLUMED_cuda_helpers_cuh
