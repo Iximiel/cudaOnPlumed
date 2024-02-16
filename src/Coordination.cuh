@@ -71,19 +71,19 @@ __device__ calculateFloat pbcClamp (calculateFloat x) {
 
 template <> __device__ __forceinline__ double pbcClamp<double> (double x) {
   // convert a double to a signed int in round-to-nearest-even mode.
-  return __double2int_rn (x) - x;
-  // return x - floor(x+0.5);
+  // return __double2int_rn (x) - x;
+  // return x - floor (x + 0.5);
   // Round argument x to an integer value in single precision floating-point
   // format.
   // Uses round to nearest rounding, with ties rounding to even.
-  // return nearbyint(x) - x;
+  return x - nearbyint (x);
 }
 
 template <> __device__ __forceinline__ float pbcClamp<float> (float x) {
   // convert a double to a signed int in round-to-nearest-even mode.
-  return __float2int_rn (x) - x;
-  // return x - floorf(x+0.5f);
-  // return nearbyintf(x) - x;
+  // return __float2int_rn (x) - x;
+  // return x - floorf (x + 0.5f);
+  return x - nearbyintf (x);
 }
 
 template <typename calculateFloat>

@@ -12,7 +12,7 @@ OBJS:= Coordination.o cudaHelpers.o
 
 all: CudaCoordination.$(soext)
 
-%.o: %.cu cudaHelpers.cuh
+%.o: %.cu cudaHelpers.cuh Coordination.cuh
 	$(NV) $(NVFLAGS) -ccbin $(compile) -o $@  $<
 
 CudaCoordination.$(soext): $(OBJS)

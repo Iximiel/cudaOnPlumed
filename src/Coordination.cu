@@ -174,6 +174,9 @@ CudaCoordination<calculateFloat>::~CudaCoordination() {
 template <typename calculateFloat>
 void CudaCoordination<calculateFloat>::calculate() {
   constexpr unsigned dataperthread = 4;
+  if (pbc) {
+    makeWhole();
+  }
   auto positions = getPositions();
   /***************************copying data on the GPU**************************/
   CUDAHELPERS::plmdDataToGPU (cudaPositions, positions, streamDerivatives);
@@ -759,18 +762,9 @@ getCoordPair (const unsigned couples,
   // ?
 
   // I do not understand why I need to invert
-  if constexpr (usePBC) {
-    d_0 =
-        calculatePBC<usePBC> (coordinates[X (i)] - coordinates[X (j)], myPBC.X);
-    d_1 =
-        calculatePBC<usePBC> (coordinates[Y (i)] - coordinates[Y (j)], myPBC.Y);
-    d_2 =
-        calculatePBC<usePBC> (coordinates[Z (i)] - coordinates[Z (j)], myPBC.Z);
-  } else {
-    d_0 = coordinates[X (j)] - coordinates[X (i)];
-    d_1 = coordinates[Y (j)] - coordinates[Y (i)];
-    d_2 = coordinates[Z (j)] - coordinates[Z (i)];
-  }
+  d_0 = calculatePBC<usePBC> (coordinates[X (j)] - coordinates[X (i)], myPBC.X);
+  d_1 = calculatePBC<usePBC> (coordinates[Y (j)] - coordinates[Y (i)], myPBC.Y);
+  d_2 = calculatePBC<usePBC> (coordinates[Z (j)] - coordinates[Z (i)], myPBC.Z);
   // d_0 = calculatePBC<usePBC> (coordinates[X (j)] - coordinates[X (i)],
   // myPBC.X); d_1 = calculatePBC<usePBC> (coordinates[Y (j)] - coordinates[Y
   // (i)], myPBC.Y); d_2 = calculatePBC<usePBC> (coordinates[Z (j)] -
