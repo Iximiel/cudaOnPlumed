@@ -271,6 +271,16 @@ void CudaCoordination<calculateFloat>::calculate() {
 //   return reinterpret_cast<T *> (memory);
 // }
 
+template <bool usePBC = false, typename T>
+T __device__ __forceinline__ calculatePBC (T const val,
+                                           PLMD::GPU::invData<T> const pbc) {
+  if constexpr (usePBC) {
+    return PLMD::GPU::pbcClamp (val * pbc.inv) * pbc.val;
+  } else {
+    return val;
+  }
+}
+
 template <bool usePBC, typename calculateFloat>
 __global__ void
 getSelfCoord (const unsigned nat,
@@ -333,18 +343,10 @@ getSelfCoord (const unsigned nat,
     // const unsigned xyz = threadIdx.z
     // where the third dim is 0 1 2 ^
     // ?
-    if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordinates[X (j)] - x) * myPBC.X.inv) *
-            myPBC.X.val;
-      d_1 = PLMD::GPU::pbcClamp ((coordinates[Y (j)] - y) * myPBC.Y.inv) *
-            myPBC.Y.val;
-      d_2 = PLMD::GPU::pbcClamp ((coordinates[Z (j)] - z) * myPBC.Z.inv) *
-            myPBC.Z.val;
-    } else {
-      d_0 = coordinates[X (j)] - x;
-      d_1 = coordinates[Y (j)] - y;
-      d_2 = coordinates[Z (j)] - z;
-    }
+
+    d_0 = calculatePBC<usePBC> (coordinates[X (j)] - x, myPBC.X);
+    d_1 = calculatePBC<usePBC> (coordinates[Y (j)] - y, myPBC.Y);
+    d_2 = calculatePBC<usePBC> (coordinates[Z (j)] - z, myPBC.Z);
 
     dfunc = 0.;
     coord = calculateSqr (
@@ -497,18 +499,9 @@ getCoordDual (const unsigned natActive,
     // const unsigned xyz = threadIdx.z
     // where the third dim is 0 1 2 ^
     // ?
-    if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.X.inv) *
-            myPBC.X.val;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.Y.inv) *
-            myPBC.Y.val;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.Z.inv) *
-            myPBC.Z.val;
-    } else {
-      d_0 = coordLoop[X (j)] - x;
-      d_1 = coordLoop[Y (j)] - y;
-      d_2 = coordLoop[Z (j)] - z;
-    }
+    d_0 = calculatePBC<usePBC> (coordLoop[X (j)] - x, myPBC.X);
+    d_1 = calculatePBC<usePBC> (coordLoop[Y (j)] - y, myPBC.Y);
+    d_2 = calculatePBC<usePBC> (coordLoop[Z (j)] - z, myPBC.Z);
 
     dfunc = 0.;
     mycoord += calculateSqr (
@@ -613,18 +606,9 @@ getDerivDual (const unsigned natLoop,
     // const unsigned xyz = threadIdx.z
     // where the third dim is 0 1 2 ^
     // ?
-    if constexpr (usePBC) {
-      d_0 = PLMD::GPU::pbcClamp ((coordLoop[X (j)] - x) * myPBC.X.inv) *
-            myPBC.X.val;
-      d_1 = PLMD::GPU::pbcClamp ((coordLoop[Y (j)] - y) * myPBC.Y.inv) *
-            myPBC.Y.val;
-      d_2 = PLMD::GPU::pbcClamp ((coordLoop[Z (j)] - z) * myPBC.Z.inv) *
-            myPBC.Z.val;
-    } else {
-      d_0 = coordLoop[X (j)] - x;
-      d_1 = coordLoop[Y (j)] - y;
-      d_2 = coordLoop[Z (j)] - z;
-    }
+    d_0 = calculatePBC<usePBC> (coordLoop[X (j)] - x, myPBC.X);
+    d_1 = calculatePBC<usePBC> (coordLoop[Y (j)] - y, myPBC.Y);
+    d_2 = calculatePBC<usePBC> (coordLoop[Z (j)] - z, myPBC.Z);
 
     dfunc = 0.;
     t = calculateSqr (
@@ -773,22 +757,24 @@ getCoordPair (const unsigned couples,
   // const unsigned xyz = threadIdx.z
   // where the third dim is 0 1 2 ^
   // ?
+
+  // I do not understand why I need to invert
   if constexpr (usePBC) {
-    d_0 = myPBC.X.val *
-          PLMD::GPU::pbcClamp ((coordinates[X (i)] - coordinates[X (j)]) *
-                               myPBC.X.inv);
-    d_1 = myPBC.Y.val *
-          PLMD::GPU::pbcClamp ((coordinates[Y (i)] - coordinates[Y (j)]) *
-                               myPBC.Y.inv);
-    d_2 = myPBC.Z.val *
-          PLMD::GPU::pbcClamp ((coordinates[Z (i)] - coordinates[Z (j)]) *
-                               myPBC.Z.inv);
+    d_0 =
+        calculatePBC<usePBC> (coordinates[X (i)] - coordinates[X (j)], myPBC.X);
+    d_1 =
+        calculatePBC<usePBC> (coordinates[Y (i)] - coordinates[Y (j)], myPBC.Y);
+    d_2 =
+        calculatePBC<usePBC> (coordinates[Z (i)] - coordinates[Z (j)], myPBC.Z);
   } else {
     d_0 = coordinates[X (j)] - coordinates[X (i)];
     d_1 = coordinates[Y (j)] - coordinates[Y (i)];
     d_2 = coordinates[Z (j)] - coordinates[Z (i)];
   }
-
+  // d_0 = calculatePBC<usePBC> (coordinates[X (j)] - coordinates[X (i)],
+  // myPBC.X); d_1 = calculatePBC<usePBC> (coordinates[Y (j)] - coordinates[Y
+  // (i)], myPBC.Y); d_2 = calculatePBC<usePBC> (coordinates[Z (j)] -
+  // coordinates[Z (i)], myPBC.Z);
   dfunc = 0.;
   // coord +=
   ncoordOut[i] = calculateSqr (

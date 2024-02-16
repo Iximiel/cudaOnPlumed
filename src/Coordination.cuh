@@ -46,19 +46,19 @@ template <typename calculateFloat> struct rationalSwitchParameters {
   int mm = 12;
 };
 
+template <typename T> struct invData {
+  T val = 1.0;
+  T inv = 1.0;
+  // this makes the `X = x;` work like "X.val=x;X.inv=1/x;"
+  // and the compiler will do some inline magic for you
+  invData (T const v) : val{v}, inv{T (1.0) / v} {}
+  invData &operator= (T const v) {
+    val = v;
+    inv = T (1.0) / v;
+    return *this;
+  }
+};
 template <typename calculateFloat> struct ortoPBCs {
-  template <typename T> struct invData {
-    T val = 1.0;
-    T inv = 1.0;
-    // this makes the `X = x;` work like "X.val=x;X.inv=1/x;"
-    // and the compiler will do some inline magic for you
-    invData (T const v) : val{v}, inv{T (1.0) / v} {}
-    invData &operator= (T const v) {
-      val = v;
-      inv = T (1.0) / v;
-      return *this;
-    }
-  };
   invData<calculateFloat> X{1.0};
   invData<calculateFloat> Y{1.0};
   invData<calculateFloat> Z{1.0};
