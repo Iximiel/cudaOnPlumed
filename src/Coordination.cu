@@ -355,23 +355,23 @@ getSelfCoord (const unsigned nat,
     coord = calculateSqr (
         d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
 
-    t_0 = dfunc * d_0;
-    t_1 = dfunc * d_1;
-    t_2 = dfunc * d_2;
-    mydevX -= t_0;
-    mydevY -= t_1;
-    mydevZ -= t_2;
+    t_0 = -dfunc * d_0;
+    t_1 = -dfunc * d_1;
+    t_2 = -dfunc * d_2;
+    mydevX += t_0;
+    mydevY += t_1;
+    mydevZ += t_2;
     if (i < j) {
       mycoord += coord;
-      myVirial_0 -= t_0 * d_0;
-      myVirial_1 -= t_0 * d_1;
-      myVirial_2 -= t_0 * d_2;
-      myVirial_3 -= t_1 * d_0;
-      myVirial_4 -= t_1 * d_1;
-      myVirial_5 -= t_1 * d_2;
-      myVirial_6 -= t_2 * d_0;
-      myVirial_7 -= t_2 * d_1;
-      myVirial_8 -= t_2 * d_2;
+      myVirial_0 += t_0 * d_0;
+      myVirial_1 += t_0 * d_1;
+      myVirial_2 += t_0 * d_2;
+      myVirial_3 += t_1 * d_0;
+      myVirial_4 += t_1 * d_1;
+      myVirial_5 += t_1 * d_2;
+      myVirial_6 += t_2 * d_0;
+      myVirial_7 += t_2 * d_1;
+      myVirial_8 += t_2 * d_2;
     }
   }
   // working in global memory ONLY at the end
@@ -510,26 +510,26 @@ getCoordDual (const unsigned natActive,
     mycoord += calculateSqr (
         d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
 
-    t = dfunc * d_0;
-    mydevX -= t;
+    t = -dfunc * d_0;
+    mydevX += t;
 
-    myVirial_0 -= t * d_0;
-    myVirial_1 -= t * d_1;
-    myVirial_2 -= t * d_2;
+    myVirial_0 += t * d_0;
+    myVirial_1 += t * d_1;
+    myVirial_2 += t * d_2;
 
-    t = dfunc * d_1;
-    mydevY -= t;
+    t = -dfunc * d_1;
+    mydevY += t;
 
-    myVirial_3 -= t * d_0;
-    myVirial_4 -= t * d_1;
-    myVirial_5 -= t * d_2;
+    myVirial_3 += t * d_0;
+    myVirial_4 += t * d_1;
+    myVirial_5 += t * d_2;
 
-    t = dfunc * d_2;
-    mydevZ -= t;
+    t = -dfunc * d_2;
+    mydevZ += t;
 
-    myVirial_6 -= t * d_0;
-    myVirial_7 -= t * d_1;
-    myVirial_8 -= t * d_2;
+    myVirial_6 += t * d_0;
+    myVirial_7 += t * d_1;
+    myVirial_8 += t * d_2;
   }
   // working in global memory ONLY at the end
   devOut[X (i)] = mydevX;
@@ -774,30 +774,30 @@ getCoordPair (const unsigned couples,
   ncoordOut[i] = calculateSqr (
       d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
 
-  mydevX = dfunc * d_0;
+  mydevX = -dfunc * d_0;
 
-  myVirial_0 -= mydevX * d_0;
-  myVirial_1 -= mydevX * d_1;
-  myVirial_2 -= mydevX * d_2;
+  myVirial_0 += mydevX * d_0;
+  myVirial_1 += mydevX * d_1;
+  myVirial_2 += mydevX * d_2;
 
-  mydevY = dfunc * d_1;
+  mydevY = -dfunc * d_1;
 
-  myVirial_3 -= mydevY * d_0;
-  myVirial_4 -= mydevY * d_1;
-  myVirial_5 -= mydevY * d_2;
+  myVirial_3 += mydevY * d_0;
+  myVirial_4 += mydevY * d_1;
+  myVirial_5 += mydevY * d_2;
 
-  mydevZ = dfunc * d_2;
+  mydevZ = -dfunc * d_2;
 
-  myVirial_6 -= mydevZ * d_0;
-  myVirial_7 -= mydevZ * d_1;
-  myVirial_8 -= mydevZ * d_2;
+  myVirial_6 += mydevZ * d_0;
+  myVirial_7 += mydevZ * d_1;
+  myVirial_8 += mydevZ * d_2;
 
-  devOut[X (i)] = -mydevX;
-  devOut[Y (i)] = -mydevY;
-  devOut[Z (i)] = -mydevZ;
-  devOut[X (j)] = mydevX;
-  devOut[Y (j)] = mydevY;
-  devOut[Z (j)] = mydevZ;
+  devOut[X (i)] = mydevX;
+  devOut[Y (i)] = mydevY;
+  devOut[Z (i)] = mydevZ;
+  devOut[X (j)] = -mydevX;
+  devOut[Y (j)] = -mydevY;
+  devOut[Z (j)] = -mydevZ;
   // ncoordOut[i] = mycoord;
   virialOut[couples * 0 + i] = myVirial_0;
   virialOut[couples * 1 + i] = myVirial_1;
