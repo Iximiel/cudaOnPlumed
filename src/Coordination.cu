@@ -164,7 +164,6 @@ void CudaCoordination<calculateFloat>::registerKeywords (Keywords &keys) {
       "compulsory", "D_MAX", "0.0", "The cut off of the switching function");
 }
 
-
 template <typename calculateFloat>
 CudaCoordination<calculateFloat>::~CudaCoordination() {
   cudaStreamDestroy (streamDerivatives);
@@ -411,7 +410,7 @@ size_t CudaCoordination<calculateFloat>::doSelf() {
 
     getSelfCoord<true><<<ngroups,
                          maxNumThreads,
-                         0,// 3 * nat * sizeof (calculateFloat),
+                         0, // 3 * nat * sizeof (calculateFloat),
                          streamDerivatives>>> (
         nat,
         switchingParameters,
@@ -424,7 +423,7 @@ size_t CudaCoordination<calculateFloat>::doSelf() {
   } else {
     getSelfCoord<false><<<ngroups,
                           maxNumThreads,
-                          0,//3 * nat * sizeof (calculateFloat),
+                          0, // 3 * nat * sizeof (calculateFloat),
                           streamDerivatives>>> (
         nat,
         switchingParameters,
@@ -660,7 +659,7 @@ size_t CudaCoordination<calculateFloat>::doDual() {
 
     getCoordDual<true><<<ngroupsA,
                          maxNumThreads,
-                         0,//3 * atomsInB * sizeof (calculateFloat),
+                         0, // 3 * atomsInB * sizeof (calculateFloat),
                          streamDerivatives>>> (
         atomsInA,
         atomsInB,
@@ -675,7 +674,7 @@ size_t CudaCoordination<calculateFloat>::doDual() {
 
     getDerivDual<true><<<ngroupsB,
                          maxNumThreads,
-                         0,// 3 * atomsInA * sizeof (calculateFloat),
+                         0, // 3 * atomsInA * sizeof (calculateFloat),
                          streamDerivatives>>> (
         atomsInA,
         atomsInB,
@@ -688,7 +687,7 @@ size_t CudaCoordination<calculateFloat>::doDual() {
   } else {
     getCoordDual<false><<<ngroupsA,
                           maxNumThreads,
-                          0,//3 * atomsInB * sizeof (calculateFloat),
+                          0, // 3 * atomsInB * sizeof (calculateFloat),
                           streamDerivatives>>> (
         atomsInA,
         atomsInB,
@@ -703,7 +702,7 @@ size_t CudaCoordination<calculateFloat>::doDual() {
 
     getDerivDual<false><<<ngroupsB,
                           maxNumThreads,
-                          0,//3 * atomsInA * sizeof (calculateFloat),
+                          0, // 3 * atomsInA * sizeof (calculateFloat),
                           streamDerivatives>>> (
         atomsInA,
         atomsInB,
@@ -987,41 +986,42 @@ CudaCoordination<calculateFloat>::CudaCoordination (const ActionOptions &ao)
   cudaStreamCreate (&streamCoordination);
   setUpPermanentGPUMemory();
 
-  maxReductionNumThreads =  min (1024,maxNumThreads);
+  maxReductionNumThreads = min (1024, maxNumThreads);
 
   cudaFuncAttributes attr;
-  //the kernels are heavy on registers, this adjust the maximum number of threads accordingly
+  // the kernels are heavy on registers, this adjust the maximum number of
+  // threads accordingly
   switch (mode) {
-    case calculationMode::self:
-      if(pbc){
-        cudaFuncGetAttributes ( &attr, &getSelfCoord<true,calculateFloat> );
-      }else{
-        cudaFuncGetAttributes ( &attr, &getSelfCoord<false,calculateFloat> );
-      }
-      break;
-    case calculationMode::dual:
-      if(pbc){
-        cudaFuncGetAttributes ( &attr, &getDerivDual<true,calculateFloat> );
-        maxNumThreads =  min (attr.maxThreadsPerBlock,maxNumThreads);
-        cudaFuncGetAttributes ( &attr, &getCoordDual<true,calculateFloat> );
-      }else{
-        cudaFuncGetAttributes ( &attr, &getDerivDual<false,calculateFloat> );
-        maxNumThreads =  min (attr.maxThreadsPerBlock,maxNumThreads);
-        cudaFuncGetAttributes ( &attr, &getCoordDual<false,calculateFloat> );
-      }
-      break;
-    case calculationMode::pair:
-      if(pbc){
-        cudaFuncGetAttributes ( &attr, &getCoordPair<true,calculateFloat> );
-      }else{
-        cudaFuncGetAttributes ( &attr, &getCoordPair<false,calculateFloat> );
-      }
-      break;
-    case calculationMode::none:
-      // throw"this should not have been happened"
-      break;
+  case calculationMode::self:
+    if (pbc) {
+      cudaFuncGetAttributes (&attr, &getSelfCoord<true, calculateFloat>);
+    } else {
+      cudaFuncGetAttributes (&attr, &getSelfCoord<false, calculateFloat>);
+    }
+    break;
+  case calculationMode::dual:
+    if (pbc) {
+      cudaFuncGetAttributes (&attr, &getDerivDual<true, calculateFloat>);
+      maxNumThreads = min (attr.maxThreadsPerBlock, maxNumThreads);
+      cudaFuncGetAttributes (&attr, &getCoordDual<true, calculateFloat>);
+    } else {
+      cudaFuncGetAttributes (&attr, &getDerivDual<false, calculateFloat>);
+      maxNumThreads = min (attr.maxThreadsPerBlock, maxNumThreads);
+      cudaFuncGetAttributes (&attr, &getCoordDual<false, calculateFloat>);
+    }
+    break;
+  case calculationMode::pair:
+    if (pbc) {
+      cudaFuncGetAttributes (&attr, &getCoordPair<true, calculateFloat>);
+    } else {
+      cudaFuncGetAttributes (&attr, &getCoordPair<false, calculateFloat>);
+    }
+    break;
+  case calculationMode::none:
+    // throw"this should not have been happened"
+    break;
   }
-  maxNumThreads =  min (attr.maxThreadsPerBlock,maxNumThreads);
+  maxNumThreads = min (attr.maxThreadsPerBlock, maxNumThreads);
 
   log << "  contacts are counted with cutoff (dmax)="
       << sqrt (switchingParameters.dmaxSQ)
@@ -1030,33 +1030,36 @@ CudaCoordination<calculateFloat>::CudaCoordination (const ActionOptions &ao)
       << ", N=" << switchingParameters.nn << ", M=" << switchingParameters.mm
       << ".\n";
   log << "GPU info:\n"
-      <<"\t max threads per coordination" <<maxNumThreads <<"\n"
-      <<"\t max threads per reduction" <<maxReductionNumThreads <<"\n";
+      << "\t max threads per coordination" << maxNumThreads << "\n"
+      << "\t max threads per reduction" << maxReductionNumThreads << "\n";
 
-  cudaFuncGetAttributes ( &attr, &getSelfCoord<true,calculateFloat> );
+  cudaFuncGetAttributes (&attr, &getSelfCoord<true, calculateFloat>);
   // std::cout<< "Attributes for pbc: \n";
 
-  // std::cout << "\tmaxDynamicSharedSizeBytes: " << attr.maxDynamicSharedSizeBytes <<"\n" ;
-  // std::cout << "\tmaxThreadsPerBlock: " << attr.maxThreadsPerBlock <<"\n" ;
-  // std::cout << "\tnumRegs: " << attr.numRegs <<"\n" ;
-  // std::cout << "\tsharedSizeBytes: " << attr.sharedSizeBytes <<"\n" ;
+  // std::cout << "\tmaxDynamicSharedSizeBytes: " <<
+  // attr.maxDynamicSharedSizeBytes <<"\n" ; std::cout << "\tmaxThreadsPerBlock:
+  // " << attr.maxThreadsPerBlock <<"\n" ; std::cout << "\tnumRegs: " <<
+  // attr.numRegs <<"\n" ; std::cout << "\tsharedSizeBytes: " <<
+  // attr.sharedSizeBytes <<"\n" ;
 
   // cudaFuncGetAttributes ( &attr, &getSelfCoord<false,calculateFloat> );
   // std::cout<< "Attributes for no pbc: \n";
 
-  // std::cout << "\tmaxDynamicSharedSizeBytes: " << attr.maxDynamicSharedSizeBytes <<"\n" ;
-  // std::cout << "\tmaxThreadsPerBlock: " << attr.maxThreadsPerBlock <<"\n" ;
-  // std::cout << "\tnumRegs: " << attr.numRegs <<"\n" ;
-  // std::cout << "\tsharedSizeBytes: " << attr.sharedSizeBytes <<"\n" ;
+  // std::cout << "\tmaxDynamicSharedSizeBytes: " <<
+  // attr.maxDynamicSharedSizeBytes <<"\n" ; std::cout << "\tmaxThreadsPerBlock:
+  // " << attr.maxThreadsPerBlock <<"\n" ; std::cout << "\tnumRegs: " <<
+  // attr.numRegs <<"\n" ; std::cout << "\tsharedSizeBytes: " <<
+  // attr.sharedSizeBytes <<"\n" ;
 
-  // cudaFuncGetAttributes ( &attr, &CUDAHELPERS::reduction1DKernel<calculateFloat, 128, 4> );
-  // std::cout<< "Attributes for reduction kernel (128): \n";
+  // cudaFuncGetAttributes ( &attr,
+  // &CUDAHELPERS::reduction1DKernel<calculateFloat, 128, 4> ); std::cout<<
+  // "Attributes for reduction kernel (128): \n";
 
-  // std::cout << "\tmaxDynamicSharedSizeBytes: " << attr.maxDynamicSharedSizeBytes <<"\n" ;
-  // std::cout << "\tmaxThreadsPerBlock: " << attr.maxThreadsPerBlock <<"\n" ;
-  // std::cout << "\tnumRegs: " << attr.numRegs <<"\n" ;
-  // std::cout << "\tsharedSizeBytes: " << attr.sharedSizeBytes <<"\n" ;
-
+  // std::cout << "\tmaxDynamicSharedSizeBytes: " <<
+  // attr.maxDynamicSharedSizeBytes <<"\n" ; std::cout << "\tmaxThreadsPerBlock:
+  // " << attr.maxThreadsPerBlock <<"\n" ; std::cout << "\tnumRegs: " <<
+  // attr.numRegs <<"\n" ; std::cout << "\tsharedSizeBytes: " <<
+  // attr.sharedSizeBytes <<"\n" ;
 }
 
 } // namespace colvar
