@@ -6,7 +6,7 @@ I am assuming that you have already read the details about how the coordination 
 So here you will see some more abstract pseudo code. Always refer to my (evolving) [repository]() for a more accurate and performant code.
 
 ## Wait, and the derivatives?
-First of all let's hastily rewrite the core kernel, stripped by the declarations 
+First of all let's hastily rewrite the core kernel, stripped of the declarations 
 
 ```c++
 __global__ void getSelfCoord(
@@ -26,6 +26,9 @@ __global__ void getSelfCoord(
   // we try working with less global memory possible
   // so we set up some temporary variables private to this kernel
   const unsigned idx = trueIndexes[i];
+  const float x = coordinates[X (i)];
+  const float y = coordinates[Y (i)];
+  const float z = coordinates[Z (i)];
   /* declaring calculation and output variables
   ...
   */
@@ -63,18 +66,16 @@ __global__ void getSelfCoord(
   */
 }
 ```
-You see what is the problem here?
-
-Actwally two: `for (unsigned j = 0; j < nat; ++j)` is a loop running on ALL the atoms and that `if (i < j)` makes this loop working "only" on the upper triange of the "square matrix of calculations".
-This affermation is actually not true: the loop works for all atoms, but for the upper triangle matrix the loop also sums the coordination and the virial (that are cnotribuited once for each couple) and the derivative for everithing else.
+We want the coordination between all of the atoms of 'GROUPA' and all of the atoms of 'GROUPB'.
+But this kernel solves a different problem: it loops on ALL the atoms and calculates the coordination between ALL of them.
 
 How can we work around this?
 
-Let's start to aknowledge that we will need to have different specialized kernels (since branching within a kernel will generate loss of performaces).
+Let's start to acknowledge that we will need to have different specialized kernels (since branching within a kernel will generate a loss of performance).
 
 Then we change the signature of the new kernel:
 ```c++
-__global__ void getABCoord(
+__global__ void getCoordDual(
     const unsigned natA,
     const unsigned natB,
     const rationalSwitchParameters switchingParameters,
@@ -93,12 +94,15 @@ we then make the first part of the kernel around this change ()
   // blocks are initializated with 'ceil (nat/threads)'
   if (i >= nat) 
     return;
-    const unsigned idx = trueIndexes[i];
+  const unsigned idx = trueIndexes[i];
+  const float x = coordinatesA[X (i)];
+  const float y = coordinatesA[Y (i)];
+  const float z = coordinatesA[Z (i)];
   /* declaring calculation and output variables
   ...
   */
   for (unsigned j = 0; j < natB; ++j) {
-    /*things*/
+    /*calculations*/
   }
 ```
 So now each atom of group A will ONLY interact with the atoms in group B, then we rewrote the core of the loop, discarding the "triangular things" of before:
@@ -133,30 +137,45 @@ So now each atom of group A will ONLY interact with the atoms in group B, then w
   }
 
 ``` 
-And we end the kernel exacly like before, so no need to specify.
+And we end the kernel exactly like in the single group case:
 
-But now we still miss a piece.
+```c++
+  devOut[X(i)] = mydevX;
+  devOut[Y(i)] = mydevY;
+  devOut[Z(i)] = mydevZ;
+  ncoordOut[i] = mycoord;
+  virialOut[natA * 0 + i] = myVirial[0];
+  virialOut[natA * 1 + i] = myVirial[1];
+  virialOut[natA * 2 + i] = myVirial[2];
+  virialOut[natA * 3 + i] = myVirial[3];
+  virialOut[natA * 4 + i] = myVirial[4];
+  virialOut[natA * 5 + i] = myVirial[5];
+  virialOut[natA * 6 + i] = myVirial[6];
+  virialOut[natA * 7 + i] = myVirial[7];
+  virialOut[natA * 8 + i] = myVirial[8];
+```
 
-The derivatives of the b atoms.
+But now we still miss a piece: atoms indexed `i` are in GROUPA: it looks like we are storing the derivatives the coordination and the virial only relative to one of the two groups.
+This affirmation is true only about the derivatives since coordination and virial are "couple" properties.
+
+So, how do we solve this new problem of getting the derivatives of GROUPB?
 
 ## Calculationg the derivatives of the atoms B
 
-So, what we do?
-
-We might calculate the derivative for the group B along the ones of group A,
-but we will end up with needing `size(groupA) * size(groupB)` extra triplette of floats
+We might calculate the derivative for group B along the ones of group A,
+but we will end up needing `size`(groupA) * size(groupB)` extra triplette of floats
 to be stored during the execution of the first kernel because we can't sum on the same
-piece of data unless we sto the parallel calculation to avoid a data race.
-And so we need extra memory to store the temporary result and reduce them after.
+piece of data unless we stop the parallel calculation to avoid a data race.
+Ad with this solution we would need to store these values since we are traversing the "matrix of couples" along the "group A axis".
 
-But in that case we will need `size(groupA) * size(groupB) * 8` bytes of memory for each dimension (that are 3).
-That means, for example that for a system of 10000 atoms, in two groups of 5000 will be 200000000 bytes, 
-that are roughly 200 MB, but since the relatioship is quadratic and the memory on a gpu is usually scarce,
-is not a scalable option.
+But in that case, we will need `size(groupA) * size(groupB) * 8` bytes of memory for each dimension (3 in our case).
+That means, for example, that for a system of 10000 atoms, in two groups of 5000 will be 200000000 bytes, 
+that are roughly 200 MB, but since the relationship is quadratic and the memory on a GPU is usually scarce,
+is not a scalable option (with a group of 100000 atoms divide d in two would be 20GB).
 
-A "easy" solution that I found is to redo the same loop, but with inverted groups and keeping ONLY
-the derivative calculations
-This solution as the same big O of the one before and do not cost extra space, apart from the one stored before.
+The easiest solution that I found is to redo the same loop, but with inverted groups, but keeping ONLY
+calculating only the derivatives.
+This does not make the algorithm scale differently (summing two algorithms with the same time complexity is an algorithm with the same time complexity) and does not use extra space.
 
 
 ```c++
@@ -170,7 +189,6 @@ __global__ void getABdevB(
     float *devOut) {
   // i is the index of the atoms that will be confronted with all the others
   const unsigned i = threadIdx.x + blockIdx.x * blockDim.x;
-
   // blocks are initializated with 'ceil (nat/threads)'
   if (i >= natB) 
     return;
@@ -212,12 +230,10 @@ __global__ void getABdevB(
 }
 ```
 
-
 ### Remarks
 The problem of this approach is that if there is a great imbalance in numbers between 
-the two groups the approach may scale not so efficiently.
+the two groups, written as is does not scale efficiently.
+
+For example, if you have group A with 1000 atoms and b with only one, you will get the first kernel doing a single iteration in 1000 threads for the first atoms, and the second kernel occupying a single thread for 1000 iterations.
 But this may be solved by trying to balance how much work each thread will need to do.
 
-I need to test these ideas (WIP):
-
- - run an atom per block, use threads to work on nat/threads atoms in parallel and reduce the derivatives for each atom in the first kernel and proceed as in the standard idea.
