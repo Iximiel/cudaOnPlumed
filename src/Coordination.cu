@@ -175,6 +175,12 @@ template <typename calculateFloat>
 void CudaCoordination<calculateFloat>::calculate() {
   constexpr unsigned dataperthread = 4;
   if (pbc) {
+    // Only ortho as now
+    auto box = getBox();
+
+    myPBC.X = box (0, 0);
+    myPBC.Y = box (1, 1);
+    myPBC.Z = box (2, 2);
     makeWhole();
   }
   auto positions = getPositions();
@@ -183,17 +189,17 @@ void CudaCoordination<calculateFloat>::calculate() {
   /***************************copying data on the GPU**************************/
 
   // number of things to be reduced
-  size_t nat = 0;
+  size_t t2br = 0;
 
   switch (mode) {
   case calculationMode::self:
-    nat = doSelf();
+    t2br = doSelf();
     break;
   case calculationMode::dual:
-    nat = doDual();
+    t2br = doDual();
     break;
   case calculationMode::pair:
-    nat = doPair();
+    t2br = doPair();
     break;
   case calculationMode::none:
     // throw"this should not have been happened"
@@ -208,7 +214,7 @@ void CudaCoordination<calculateFloat>::calculate() {
   auto deriv = std::vector<Vector> (positions.size());
   CUDAHELPERS::plmdDataFromGPU (cudaDerivatives, deriv, streamDerivatives);
 
-  auto N = nat;
+  auto N = t2br;
 
   while (N > 1) {
     size_t runningThreads = CUDAHELPERS::threadsPerBlock (
@@ -342,10 +348,6 @@ getSelfCoord (const unsigned nat,
     // Safeguard
     if (idx == trueIndexes[j])
       continue;
-    // or may be better to set up an
-    // const unsigned xyz = threadIdx.z
-    // where the third dim is 0 1 2 ^
-    // ?
 
     d_0 = calculatePBC<usePBC> (coordinates[X (j)] - x, myPBC.X);
     d_1 = calculatePBC<usePBC> (coordinates[Y (j)] - y, myPBC.Y);
@@ -403,13 +405,6 @@ size_t CudaCoordination<calculateFloat>::doSelf() {
   // this calculates the derivatives and prepare the coordination and the
   // virial for the accumulation
   if (pbc) {
-    // Only ortho as now
-    auto box = getBox();
-
-    myPBC.X = box (0, 0);
-    myPBC.Y = box (1, 1);
-    myPBC.Z = box (2, 2);
-
     getSelfCoord<true><<<ngroups,
                          maxNumThreads,
                          0, // 3 * nat * sizeof (calculateFloat),
@@ -498,10 +493,7 @@ getCoordDual (const unsigned natActive,
     // Safeguard
     if (idx == trueIndexes[j])
       continue;
-    // or may be better to set up an
-    // const unsigned xyz = threadIdx.z
-    // where the third dim is 0 1 2 ^
-    // ?
+
     d_0 = calculatePBC<usePBC> (coordLoop[X (j)] - x, myPBC.X);
     d_1 = calculatePBC<usePBC> (coordLoop[Y (j)] - y, myPBC.Y);
     d_2 = calculatePBC<usePBC> (coordLoop[Z (j)] - z, myPBC.Z);
@@ -605,10 +597,7 @@ getDerivDual (const unsigned natLoop,
     // Safeguard
     if (idx == trueIndexes[j])
       continue;
-    // or may be better to set up an
-    // const unsigned xyz = threadIdx.z
-    // where the third dim is 0 1 2 ^
-    // ?
+
     d_0 = calculatePBC<usePBC> (coordLoop[X (j)] - x, myPBC.X);
     d_1 = calculatePBC<usePBC> (coordLoop[Y (j)] - y, myPBC.Y);
     d_2 = calculatePBC<usePBC> (coordLoop[Z (j)] - z, myPBC.Z);
@@ -637,13 +626,6 @@ size_t CudaCoordination<calculateFloat>::doDual() {
   cudaVirial.resize (atomsInA * 9);
   /**************************starting the calculations*************************/
   if (pbc) {
-    // Only ortho as now
-    auto box = getBox();
-
-    myPBC.X = box (0, 0);
-    myPBC.Y = box (1, 1);
-    myPBC.Z = box (2, 2);
-
     getCoordDual<true><<<ngroupsA,
                          maxNumThreads,
                          0, // 3 * atomsInB * sizeof (calculateFloat),
@@ -753,14 +735,6 @@ getCoordPair (const unsigned couples,
   calculateFloat mydevY;
   calculateFloat mydevZ;
 
-  // Safeguard
-  // if (idx == trueIndexes[j])
-  //   continue;
-  // or may be better to set up an
-  // const unsigned xyz = threadIdx.z
-  // where the third dim is 0 1 2 ^
-  // ?
-
   // I do not understand why I need to invert
   d_0 = calculatePBC<usePBC> (coordinates[X (j)] - coordinates[X (i)], myPBC.X);
   d_1 = calculatePBC<usePBC> (coordinates[Y (j)] - coordinates[Y (i)], myPBC.Y);
@@ -819,13 +793,6 @@ size_t CudaCoordination<calculateFloat>::doPair() {
   cudaVirial.resize (couples * 9);
   /**************************starting the calculations*************************/
   if (pbc) {
-    // Only ortho as now
-    auto box = getBox();
-
-    myPBC.X = box (0, 0);
-    myPBC.Y = box (1, 1);
-    myPBC.Z = box (2, 2);
-
     getCoordPair<true><<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
         couples,
         switchingParameters,
