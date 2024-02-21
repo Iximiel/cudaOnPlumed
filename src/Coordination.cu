@@ -693,13 +693,16 @@ __global__ void getCoordPair (
     const PLMD::GPU::rationalSwitchParameters<calculateFloat>
         switchingParameters,
     const PLMD::GPU::ortoPBCs<calculateFloat> myPBC,
-    const calculateFloat *const coordinates, // const pointer to const values
+    const calculateFloat *const coordinatesI, // const pointer to const values
+    const calculateFloat *const coordinatesJ, // const pointer to const values
     const unsigned *const trueIndexes,
     calculateFloat *const ncoordOut, // const pointer
-    calculateFloat *const devOut,
+    calculateFloat *const devOutI,
+    calculateFloat *const devOutJ,
     calculateFloat *const virialOut) {
   // blockDIm are the number of threads in your block
   const unsigned tid = threadIdx.x + blockIdx.x * blockDim.x;
+  const unsigned firstCouple = couplesPerThreads * tid;
 
   if (tid >= totThreads) { // blocks are initializated with 'ceil (nat/threads)'
     return;
@@ -708,8 +711,6 @@ __global__ void getCoordPair (
   // temporary variables
   // const unsigned idx = ;
   // const unsigned jdx = trueIndexes[j];
-
-  // calculateFloat mycoord = 0.0;
 
   // the previous version used static array for myVirial and d
   // using explicit variables guarantees that this data will be stored in
@@ -728,56 +729,49 @@ __global__ void getCoordPair (
   calculateFloat d_0, d_1, d_2;
   // calculateFloat t;
   calculateFloat dfunc;
-  calculateFloat mydevX;
-  calculateFloat mydevY;
-  calculateFloat mydevZ;
+  calculateFloat t;
   calculateFloat myCoord = 0.0;
   for (unsigned k = 0; k < couplesPerThreads; ++k) {
-    const unsigned i = k + tid * couplesPerThreads;
+    const unsigned i = k + firstCouple;
 
-    const unsigned j = i + couples;
     if (i >= couples) { // blocks are initializated with 'ceil (nat/threads)'
       break;
     }
     // I do not understand why I need to invert
-    d_0 =
-        calculatePBC<usePBC> (coordinates[X (j)] - coordinates[X (i)], myPBC.X);
-    d_1 =
-        calculatePBC<usePBC> (coordinates[Y (j)] - coordinates[Y (i)], myPBC.Y);
-    d_2 =
-        calculatePBC<usePBC> (coordinates[Z (j)] - coordinates[Z (i)], myPBC.Z);
-    // d_0 = calculatePBC<usePBC> (coordinates[X (j)] - coordinates[X (i)],
-    // myPBC.X); d_1 = calculatePBC<usePBC> (coordinates[Y (j)] - coordinates[Y
-    // (i)], myPBC.Y); d_2 = calculatePBC<usePBC> (coordinates[Z (j)] -
-    // coordinates[Z (i)], myPBC.Z);
+    d_0 = calculatePBC<usePBC> (coordinatesJ[X (i)] - coordinatesI[X (i)],
+                                myPBC.X);
+    d_1 = calculatePBC<usePBC> (coordinatesJ[Y (i)] - coordinatesI[Y (i)],
+                                myPBC.Y);
+    d_2 = calculatePBC<usePBC> (coordinatesJ[Z (i)] - coordinatesI[Z (i)],
+                                myPBC.Z);
     dfunc = 0.;
-    myCoord += calculateSqr (
-        d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
+    if (trueIndexes[i] != trueIndexes[i + couples]) {
+      myCoord += calculateSqr (
+          d_0 * d_0 + d_1 * d_1 + d_2 * d_2, switchingParameters, dfunc);
+    } else {
+      d_0 = d_1 = d_2 = 0.0;
+    }
 
-    mydevX = -dfunc * d_0;
+    t = -dfunc * d_0;
+    myVirial_0 += t * d_0;
+    myVirial_1 += t * d_1;
+    myVirial_2 += t * d_2;
+    devOutI[X (i)] = t;
+    devOutJ[X (i)] = -t;
 
-    myVirial_0 += mydevX * d_0;
-    myVirial_1 += mydevX * d_1;
-    myVirial_2 += mydevX * d_2;
+    t = -dfunc * d_1;
+    myVirial_3 += t * d_0;
+    myVirial_4 += t * d_1;
+    myVirial_5 += t * d_2;
+    devOutI[Y (i)] = t;
+    devOutJ[Y (i)] = -t;
 
-    mydevY = -dfunc * d_1;
-
-    myVirial_3 += mydevY * d_0;
-    myVirial_4 += mydevY * d_1;
-    myVirial_5 += mydevY * d_2;
-
-    mydevZ = -dfunc * d_2;
-
-    myVirial_6 += mydevZ * d_0;
-    myVirial_7 += mydevZ * d_1;
-    myVirial_8 += mydevZ * d_2;
-
-    devOut[X (i)] = mydevX;
-    devOut[Y (i)] = mydevY;
-    devOut[Z (i)] = mydevZ;
-    devOut[X (j)] = -mydevX;
-    devOut[Y (j)] = -mydevY;
-    devOut[Z (j)] = -mydevZ;
+    t = -dfunc * d_2;
+    myVirial_6 += t * d_0;
+    myVirial_7 += t * d_1;
+    myVirial_8 += t * d_2;
+    devOutI[Z (i)] = t;
+    devOutJ[Z (i)] = -t;
   }
   ncoordOut[tid] = myCoord;
   virialOut[totThreads * 0 + tid] = myVirial_0;
@@ -807,9 +801,11 @@ size_t CudaCoordination<calculateFloat>::doPair() {
         switchingParameters,
         myPBC,
         thrust::raw_pointer_cast (cudaPositions.data()),
+        thrust::raw_pointer_cast (cudaPositions.data()) + 3 * couples,
         thrust::raw_pointer_cast (cudaTrueIndexes.data()),
         thrust::raw_pointer_cast (cudaCoordination.data()),
         thrust::raw_pointer_cast (cudaDerivatives.data()),
+        thrust::raw_pointer_cast (cudaDerivatives.data()) + 3 * couples,
         thrust::raw_pointer_cast (cudaVirial.data()));
   } else {
     getCoordPair<false><<<ngroups, maxNumThreads, 0, streamDerivatives>>> (
@@ -818,9 +814,11 @@ size_t CudaCoordination<calculateFloat>::doPair() {
         switchingParameters,
         myPBC,
         thrust::raw_pointer_cast (cudaPositions.data()),
+        thrust::raw_pointer_cast (cudaPositions.data()) + 3 * couples,
         thrust::raw_pointer_cast (cudaTrueIndexes.data()),
         thrust::raw_pointer_cast (cudaCoordination.data()),
         thrust::raw_pointer_cast (cudaDerivatives.data()),
+        thrust::raw_pointer_cast (cudaDerivatives.data()) + 3 * couples,
         thrust::raw_pointer_cast (cudaVirial.data()));
   }
   return neededThreads;
