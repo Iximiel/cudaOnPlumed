@@ -1,9 +1,9 @@
 ## Premise
 
-We now try to change what we made in the [auto-coordination](Implementation.md) and determine the coordination between two groups.
+We now try to change what we made in the [self-coordination](Implementation.md) and determine the coordination between two groups.
 
 I am assuming that you have already read the details about how the coordination is implemented in the [other chapter](Implementation.md).
-So here you will see some more abstract pseudo code. Always refer to my (evolving) [repository]() for a more accurate and performant code.
+So here you will see some more abstract pseudo code. Always refer to my (evolving) [repository](https://github.com/Iximiel/cudaOnPlumed) and on the main [plumed repository](https://github.com/plumed/plumed2) for a more accurate and performant code.
 
 ## Wait, and the derivatives?
 First of all let's hastily rewrite the core kernel, stripped of the declarations 

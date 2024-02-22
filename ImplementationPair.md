@@ -1,5 +1,7 @@
 ## Implement the pair coordination
 
+See the main [coordination implementation](Implementation.md), the code there is uses as a starting point for this  variant.
+
 This should be the easiest implementation: 
 If each kernel will run only on a couple it could be written like this:
 
