@@ -357,3 +357,7 @@ for (unsigned i = 0; i < deriv.size(); ++i)
 setValue(coordination);
 setBoxDerivatives(virial);
 ```
+## Other implementations
+
+I also set up the explanation for the implementation of the coordination for [two groups](ImplementationTwoGroups) and the [pair](ImplementationPair) version
+
