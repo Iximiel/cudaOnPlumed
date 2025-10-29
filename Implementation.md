@@ -2,7 +2,11 @@
 
 Small disclaimer: the code I am presenting here is a simplified version of the
 actual code that is available as an example implementation in this
-[repository](https://github.com/Iximiel/cudaOnPlumed).
+[repository](https://github.com/Iximiel/cudaOnPlumed). However for production runs
+I would suggest to use the version that are hosted in the main plumed repository,
+at time of writing this in version [v2.10](https://github.com/plumed/plumed2/tree/v2.10/plugins/cudaCoord)
+or the more updated version in [master](https://github.com/plumed/plumed2/tree/master/plugins/cudaCoord)
+these versions depend on C++17.
 The actual implementation has type templates and supports pbcs.
 These particulars are not useful in understanding the basis for a plumed
 implementation of a  simple CV.
@@ -11,7 +15,8 @@ If this is not the first time you read this I have updated the code on the
 repository to use the NVIDIA's [CCCL](https://github.com/NVIDIA/cccl) API.
 You may find some changes in the code.
 The code changes are not radical and I may have missed something while updating
-the page, always refer to the repository for an up-to-date code.
+the page, always refer to the code present in the main [plumed repository](https://github.com/plumed/plumed2/tree/master/plugins/cudaCoord)
+for an up-to-date code.
 
 ## The switching function
 In this case the coordination is calculated with
