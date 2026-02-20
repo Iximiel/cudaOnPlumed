@@ -15,12 +15,14 @@ Implementation
 Helpers
 AB[GROUPA,GROUPB]
 Pair
+Advanced
 
 Intro ==> Implementation
 Implementation <==> Helpers
 Intro ==> Helpers
 Implementation <==> Pair
 Implementation <==> AB
+Implementation <==> Advanced
 
 
 click Intro "NAVIGATION.md" "The introduction"
@@ -28,4 +30,5 @@ click Implementation "Implementation.md" "The coordination implementation"
 click AB "ImplementationTwoGroups.md" "The coordination between two groups"
 click Pair "ImplementationPair.md" "The coordination in pairs"
 click Helpers "Helpers.md" "A simple manual with the helper library"
+click Advanced "Advanced.md" "Pushing the GPU"
 ```

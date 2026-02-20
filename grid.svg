@@ -1,0 +1,196 @@
+<!-- Made with AI, modified by hands-->
+<svg id="interactiveGrid" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 368 368" width="420" height="420" style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial;">
+  <style>
+    .cell {
+      cursor: pointer;
+      outline: none;
+      fill: none;
+      transition: transform 140ms ease, opacity 140ms ease;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    .cell rect {
+      fill: #e6eef7;
+      stroke: #0f172a;
+      stroke-width: 1.5;
+      rx: 2%;
+      transition: fill 160ms ease, stroke 160ms ease, opacity 160ms ease;
+    }
+
+    .cell text {
+      font-size: 22px;
+      font-weight: 700;
+      fill: #0b1220;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    /* States */
+    .is-dim rect {
+      opacity: 0.35;
+    }
+
+    .is-center {
+      transform: scale(1.05);
+    }
+
+    .is-center rect {
+      fill: #4f46e5;
+      stroke-width: 2.2;
+    }
+
+    .is-nei rect {
+      fill: #059669;
+      stroke-width: 2;
+    }
+  </style>
+  <g class="grid-frame">
+    <rect x="6" y="6" width="356" height="356" rx="14" fill="none" stroke="#cbd5e1" stroke-dasharray="6 4" id="frame" />
+  </g>
+  <g id="cells" class="grid" transform="translate(12,12)">
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="0" data-c="0" id="cell1">
+      <rect x="0" y="0" width="80" height="80" id="rect1" />
+      <text x="40" y="48" text-anchor="middle" id="text1">1</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="0" data-c="1" id="cell2">
+      <rect x="88" y="0" width="80" height="80" id="rect2" />
+      <text x="128" y="48" text-anchor="middle" id="text2">2</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="0" data-c="2" id="cell3">
+      <rect x="176" y="0" width="80" height="80" id="rect3" />
+      <text x="216" y="48" text-anchor="middle" id="text3">3</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-dim" tabindex="0" data-r="0" data-c="3" id="cell4">
+      <rect x="264" y="0" width="80" height="80" id="rect4" />
+      <text x="304" y="48" text-anchor="middle" id="text4">4</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="1" data-c="0" id="cell5">
+      <rect x="0" y="88" width="80" height="80" id="rect5" />
+      <text x="40" y="136" text-anchor="middle" id="text5">5</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-center" tabindex="0" data-r="1" data-c="1" id="cell6">
+      <rect x="88" y="88" width="80" height="80" id="rect6" />
+      <text x="128" y="136" text-anchor="middle" id="text6">6</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="1" data-c="2" id="cell7">
+      <rect x="176" y="88" width="80" height="80" id="rect7" />
+      <text x="216" y="136" text-anchor="middle" id="text7">7</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-dim" tabindex="0" data-r="1" data-c="3" id="cell8">
+      <rect x="264" y="88" width="80" height="80" id="rect8" />
+      <text x="304" y="136" text-anchor="middle" id="text8">8</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="2" data-c="0" id="cell9">
+      <rect x="0" y="176" width="80" height="80" id="rect9" />
+      <text x="40" y="224" text-anchor="middle" id="text9">9</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="2" data-c="1" id="cell10">
+      <rect x="88" y="176" width="80" height="80" id="rect10" />
+      <text x="128" y="224" text-anchor="middle" id="text10">10</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-nei" tabindex="0" data-r="2" data-c="2" id="cell11">
+      <rect x="176" y="176" width="80" height="80" id="rect11" />
+      <text x="216" y="224" text-anchor="middle" id="text11">11</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-dim" tabindex="0" data-r="2" data-c="3" id="cell12">
+      <rect x="264" y="176" width="80" height="80" id="rect12" />
+      <text x="304" y="224" text-anchor="middle" id="text12">12</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-dim" tabindex="0" data-r="3" data-c="0" id="cell13">
+      <rect x="0" y="264" width="80" height="80" id="rect13" />
+      <text x="40" y="312" text-anchor="middle" id="text13">13</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-dim" tabindex="0" data-r="3" data-c="1" id="cell14">
+      <rect x="88" y="264" width="80" height="80" id="rect14" />
+      <text x="128" y="312" text-anchor="middle" id="text14">14</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-dim" tabindex="0" data-r="3" data-c="2" id="cell15">
+      <rect x="176" y="264" width="80" height="80" id="rect15" />
+      <text x="216" y="312" text-anchor="middle" id="text15">15</text>
+    </g>
+    <g xmlns="http://www.w3.org/2000/svg" class="cell is-dim" tabindex="0" data-r="3" data-c="3" id="cell16">
+      <rect x="264" y="264" width="80" height="80" id="rect16" />
+      <text x="304" y="312" text-anchor="middle" id="text16">16</text>
+    </g>
+  </g>
+  <script>
+    <![CDATA[
+    (function() {
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const rows = 4,
+        cols = 4;
+      const cell = 80,
+        gap = 8;
+      const cellsGroup = Array.from(document.querySelectorAll('.cell'))
+      // Build cells
+      const cells = [];
+      for (const group of cellsGroup) {
+        const r = parseInt(group.dataset.r);
+        const c = parseInt(group.dataset.c);
+        cells.push({
+          r,
+          c,
+          group
+        });
+      }
+
+      function clearStates() {
+        for (const {
+            group
+          } of cells) {
+          group.classList.remove('is-center', 'is-nei', 'is-dim');
+        }
+      }
+      // PBC wrapping
+      const mod = (a, n) => ((a % n) + n) % n;
+
+      function highlight(cr, cc) {
+        // Dim all
+        clearStates();
+        for (const {
+            group
+          } of cells) {
+          group.classList.add('is-dim');
+        }
+        for (const cell of cells) {
+          // Compute wrapped relative distance
+          const dr = mod(cell.r - cr, rows);
+          const dc = mod(cell.c - cc, cols);
+          const wr = dr > rows / 2 ? dr - rows : dr;
+          const wc = dc > cols / 2 ? dc - cols : dc;
+          if (wr === 0 && wc === 0) {
+            cell.group.classList.remove('is-dim');
+            cell.group.classList.add('is-center');
+          } else if (Math.abs(wr) <= 1 && Math.abs(wc) <= 1) {
+            cell.group.classList.remove('is-dim');
+            cell.group.classList.add('is-nei');
+          }
+        }
+      }
+
+      function onEnter(e) {
+        const r = +e.currentTarget.getAttribute('data-r');
+        const c = +e.currentTarget.getAttribute('data-c');
+        highlight(r, c);
+      }
+
+      function onLeave() {
+        clearStates();
+      }
+      for (const {
+          group
+        } of cells) {
+        group.addEventListener('mouseenter', onEnter);
+        group.addEventListener('focus', onEnter);
+        group.addEventListener('mouseleave', onLeave);
+        group.addEventListener('blur', onLeave);
+      }
+      const svg = document.querySelector('svg');
+      svg.addEventListener('mouseleave', () => {
+        highlight(1, 1);
+      });
+    })();
+    ]]>
+  </script>
+</svg>
