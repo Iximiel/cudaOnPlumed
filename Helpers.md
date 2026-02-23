@@ -163,3 +163,13 @@ with a `thrust::device_vector<float>` as argument, they create a temporary
 `std::vector` to convert and pass the data from/to the GPU.
 In this case, the `DataFrom` function ignores the stream parameter to avoid
 starting to convert an array that has not been completely transferred from the GPU
+
+In the [advanced](Advanced.md) section we will use
+```c++
+template <typename T>
+inline void plmdDataToGPU (thrust::device_vector<std::remove_const_t<T>> &dvmem,
+                           PLMD::View<T> data,
+                           cudaStream_t stream);
+```
+That works exactly as the previous signatures, but transfers a the data from a View to the GPU, there is no `From` version, since this is used to move the neighbour configuration, that it is read only.
+
